@@ -7,6 +7,7 @@
  */
 
 import { Prisma, PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import {
   validateCommits,
   validateContracts,
@@ -15,6 +16,30 @@ import {
 import { BRANCH, COMMIT_SHA, REPO, SCANNED_AT, commits, contracts, graph } from './demo-data';
 
 const prisma = new PrismaClient();
+
+// Demo login for local dev — email/password shown in the seed output and README.
+const DEMO_USER = {
+  email: 'demo@acme.com',
+  password: 'demo1234',
+  name: 'Priya Nair',
+  handle: 'priyan',
+  team: 'payments',
+};
+
+async function seedDemoUser(): Promise<void> {
+  const passwordHash = await bcrypt.hash(DEMO_USER.password, 10);
+  await prisma.user.upsert({
+    where: { email: DEMO_USER.email },
+    update: { passwordHash, name: DEMO_USER.name, handle: DEMO_USER.handle, team: DEMO_USER.team },
+    create: {
+      email: DEMO_USER.email,
+      passwordHash,
+      name: DEMO_USER.name,
+      handle: DEMO_USER.handle,
+      team: DEMO_USER.team,
+    },
+  });
+}
 
 function assertValid(): void {
   const errors = [
@@ -29,6 +54,8 @@ function assertValid(): void {
 
 async function main(): Promise<void> {
   assertValid();
+
+  await seedDemoUser();
 
   // Idempotent: wipe any existing graph for this (repo, branch, commit); cascades to contracts/commits.
   await prisma.graph.deleteMany({ where: { repo: REPO, branch: BRANCH, commitSha: COMMIT_SHA } });
@@ -83,6 +110,8 @@ async function main(): Promise<void> {
   };
   // eslint-disable-next-line no-console
   console.log(`Seeded ${REPO}@${BRANCH} (${COMMIT_SHA}):`, counts);
+  // eslint-disable-next-line no-console
+  console.log(`Demo login: ${DEMO_USER.email} / ${DEMO_USER.password}`);
 }
 
 main()

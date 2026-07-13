@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from './auth/auth.module';
 import { CommitsModule } from './commits/commits.module';
 import { CommonModule } from './common/common.module';
 import { ContractsModule } from './contracts/contracts.module';
@@ -7,7 +8,7 @@ import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [PrismaModule, CommonModule, GraphModule, ContractsModule, CommitsModule],
+  imports: [PrismaModule, CommonModule, AuthModule, GraphModule, ContractsModule, CommitsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
