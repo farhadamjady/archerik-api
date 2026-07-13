@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cartograph-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cartograph
+      POSTGRES_PASSWORD: cartograph
+      POSTGRES_DB: cartograph
+    ports:
+      - '5432:5432'
+    volumes:
+      - cartograph-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cartograph -d cartograph']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional web UI for the DB at http://localhost:8080 (profile: tools)
+  adminer:
+    image: adminer:4
+    container_name: cartograph-adminer
+    restart: unless-stopped
+    profiles: ['tools']
+    ports:
+      - '8080:8080'
+    depends_on:
+      - db
+
+volumes:
+  cartograph-pgdata:

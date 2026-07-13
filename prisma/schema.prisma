@@ -1,0 +1,75 @@
+// Cartograph persistence — JSONB-centric so the seeded demo dataset maps 1:1 to the API shapes.
+// Mirrors CLAUDE.md §4. Extractor/scan tables (scans) are defined now but unused until P2.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A single immutable scan result for (repo, branch, commit). `data` holds { teams, nodes, edges }.
+model Graph {
+  id        String   @id @default(uuid()) @db.Uuid
+  repo      String
+  branch    String
+  commitSha String   @map("commit_sha") @db.VarChar(40)
+  scannedAt DateTime @map("scanned_at")
+  data      Json     @db.JsonB
+
+  contracts Contract[]
+  commits   Commit[]
+
+  @@unique([repo, branch, commitSha])
+  @@index([repo, branch, scannedAt])
+  @@map("graphs")
+}
+
+/// One row per REST endpoint or Kafka topic. `data` holds the full contract object.
+model Contract {
+  id      String @id @default(uuid()) @db.Uuid
+  graphId String @map("graph_id") @db.Uuid
+  kind    String // 'rest' | 'kafka'
+  data    Json   @db.JsonB
+
+  graph Graph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+
+  @@index([graphId, kind])
+  @@map("contracts")
+}
+
+/// Architecture-relevant commit with its graph diff. `changes` holds the change records array.
+model Commit {
+  id          String   @id @default(uuid()) @db.Uuid
+  graphId     String   @map("graph_id") @db.Uuid
+  commitSha   String   @map("commit_sha") @db.VarChar(40)
+  authorName  String   @map("author_name")
+  authorHandle String? @map("author_handle")
+  authorEmail String?  @map("author_email")
+  message     String
+  pr          String?
+  branch      String?
+  when        DateTime
+  changes     Json     @db.JsonB
+
+  graph Graph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+
+  @@index([graphId, when])
+  @@map("commits")
+}
+
+/// Scan jobs (P2). Present for schema completeness; not used by the P0 API.
+model Scan {
+  id          String    @id @default(uuid()) @db.Uuid
+  repo        String
+  branch      String
+  status      String // 'queued' | 'in_progress' | 'complete' | 'failed'
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  results     Json?     @db.JsonB
+  error       String?
+
+  @@map("scans")
+}
