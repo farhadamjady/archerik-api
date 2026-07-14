@@ -91,6 +91,58 @@ model Session {
   @@map("sessions")
 }
 
+/// A control-plane tenant the extractor submits under. Carries the entitlement the extractor's
+/// `/v1/auth/validate` gate decodes (plan/quota/expiry). Quota is a placeholder int for now.
+model Account {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  plan           String   @default("mvp")
+  quotaRemaining Int      @default(1000000) @map("quota_remaining")
+  expiresAt      DateTime @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  apiKeys   ApiKey[]
+  baselines ServiceBaseline[]
+
+  @@map("accounts")
+}
+
+/// An extractor API key. Stored as sha256(key) so a DB dump can't be replayed. Sent as
+/// `Authorization: Bearer <key>` on both /v1/auth/validate and /v1/ingest.
+model ApiKey {
+  id        String    @id @default(uuid()) @db.Uuid
+  accountId String    @map("account_id") @db.Uuid
+  keyHash   String    @unique @map("key_hash")
+  label     String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("api_keys")
+}
+
+/// The stored per-service baseline for diffing. `body` holds the extractor's byte-stable Service
+/// JSON VERBATIM (raw bytes) — the "unchanged" fast path is bytes.Equal(body, incoming), so we must
+/// never re-marshal. One baseline per (account, service_id, default_branch).
+model ServiceBaseline {
+  id            String   @id @default(uuid()) @db.Uuid
+  accountId     String   @map("account_id") @db.Uuid
+  serviceId     String   @map("service_id")
+  serviceName   String?  @map("service_name")
+  defaultBranch String   @map("default_branch")
+  sha           String?  @db.VarChar(40)
+  body          Bytes
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, serviceId, defaultBranch])
+  @@index([accountId])
+  @@map("service_baselines")
+}
+
 /// Scan jobs (P2). Present for schema completeness; not used by the P0 API.
 model Scan {
   id          String    @id @default(uuid()) @db.Uuid
