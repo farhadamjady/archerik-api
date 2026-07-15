@@ -36,8 +36,9 @@ const teams: TeamDto[] = [
   { id: 'unknown', name: 'Unknown', tier: 3, hue: 0 },
 ];
 
-const service = (id: string, team: string): NodeDto => ({ id, name: id, team, type: 'service', note: null });
-const external = (id: string): NodeDto => ({ id, name: id, team: 'external', type: 'external', note: null });
+const service = (id: string, team: string, language = 'Java'): NodeDto => ({ id, name: id, team, type: 'service', note: null, language });
+// External / unknown targets are not scanned — no language claim, ever.
+const external = (id: string): NodeDto => ({ id, name: id, team: 'external', type: 'external', note: null, language: null });
 
 const nodes: NodeDto[] = [
   service('ApiGateway', 'gateway'),
@@ -46,13 +47,13 @@ const nodes: NodeDto[] = [
   service('RefundService', 'payments'),
   service('FraudCheckService', 'payments'),
   service('CatalogService', 'catalog'),
-  service('PricingService', 'catalog'),
+  service('PricingService', 'catalog', 'Kotlin'),
   service('OrderService', 'orders'),
   service('PromotionService', 'promotions'),
   service('InventoryService', 'inventory'),
   service('StockReservationService', 'inventory'),
   service('NotificationService', 'notifications'),
-  service('AnalyticsIngestService', 'analytics'),
+  service('AnalyticsIngestService', 'analytics', 'Kotlin'),
   external('StripeAPI'),
   external('TwilioAPI'),
   {

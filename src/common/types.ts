@@ -36,6 +36,8 @@ export interface NodeDto {
   type: NodeType;
   /** Human-readable explanation, required for unknown nodes; null otherwise. */
   note: string | null;
+  /** Primary implementation language, canonical casing (e.g. "Java", "Kotlin"); null when not scanned/reported. */
+  language?: string | null;
 }
 
 export interface EdgeDto {
