@@ -13,11 +13,7 @@ function endpointLine(mark: string, e: Endpoint): string {
   return `- ${mark} ${e.method} ${e.path} · ${e.protocol} · ${e.detection} · ${e.confidence}`;
 }
 
-function depLine(
-  mark: string,
-  d: OutboundDependency,
-  resolutions: Record<string, string>,
-): string {
+function depLine(mark: string, d: OutboundDependency, resolutions: Record<string, string>): string {
   const url = d.url ? ` → \`${d.url}\`` : '';
   const resolution = resolutions[`${d.target_name}|${d.detection}`] ?? 'external';
   return `- ${mark} ${d.target_name}${url} · ${d.protocol} · ${d.detection} · ${d.confidence} · ${resolution}`;
@@ -61,8 +57,14 @@ export function renderMarkdown(diff: GraphDiff, firstScan: boolean): string {
   ];
 
   return (
-    [heading, '', `**${added} added · ${removed} removed · ${changed} changed**`, '', ...body, '']
-      .join('\n') +
+    [
+      heading,
+      '',
+      `**${added} added · ${removed} removed · ${changed} changed**`,
+      '',
+      ...body,
+      '',
+    ].join('\n') +
     '\n' +
     FOOTER +
     '\n'

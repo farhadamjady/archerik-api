@@ -20,6 +20,13 @@ Conventions:
 - Auth: every request carries `Authorization: Bearer <token>` once logged in. Any endpoint may
   return `401` — the UI treats that globally as "session expired", clears the token, and shows the
   login screen.
+- **Read model scope (account = the company):** the read endpoints (`/graph`, `/contracts`,
+  `/commits`) are scoped to the **account** the logged-in user belongs to — derived from the session
+  token, never a query param. After login the UI needs no repo to start: `GET /graph` with no params
+  returns the account's **entire** architecture (the union of every service the extractor has
+  ingested for that account, across all repos), projected into one current-head graph per
+  `(account, branch)`. `repo` and `service` are **optional filters** that narrow that graph, not
+  required keys. Each service node carries its `repo` so the UI can group/filter client-side too.
 - **Executable reference:** `dev-server.mjs` in this repo implements this entire contract over the
   demo dataset (`node dev-server.mjs`, endpoints on `http://localhost:8787/api/v1`). When in doubt
   about a shape, diff against what it returns.
@@ -28,10 +35,20 @@ Conventions:
 
 ## P0 — required to replace the mock data
 
-### 1. `GET /api/v1/graph?repo=acme/shop-platform&branch=main`
+### 1. `GET /api/v1/graph` (optional `?repo=…&service=…&branch=main`)
 
-The whole graph in one payload (current scale ~92 nodes / ~189 edges — no pagination needed;
-the UI lays out and filters client-side).
+The whole account graph in one payload (current scale ~92 nodes / ~189 edges — no pagination
+needed; the UI lays out and filters client-side). **All query params are optional** — with none, you
+get everything the account owns. `repo` subsets to one repository; `service` focuses one service and
+its immediate neighbours; `branch` defaults to `main`. The envelope's `repo` echoes the applied
+filter, or is `null` when the whole account is returned. Each `service` node includes a `repo` field
+(null for `external`/`unknown` nodes).
+
+A **fresh account with no scans yet** returns `200` with an **empty graph**
+(`{ "repo": null, "branch": "main", "scannedAt": null, "teams": [], "nodes": [], "edges": [] }`) —
+not a 404. Note `scannedAt` is `null` in that case. `/contracts` and `/commits` likewise return
+`200` with empty payloads (`{ "endpoints": [], "topics": [] }` and `[]`). Render a "no scans yet"
+empty state rather than an error.
 
 ```jsonc
 {
@@ -44,11 +61,12 @@ the UI lays out and filters client-side).
     { "id": "payments", "name": "Payments", "tier": 2, "hue": 150 }
   ],
   "nodes": [
-    { "id": "PaymentService", "name": "PaymentService", "team": "payments", "type": "service", "note": null },
-    { "id": "StripeAPI", "name": "StripeAPI", "team": "external", "type": "external", "note": null },
+    // service nodes carry `repo` (and `language` when known); external/unknown carry repo: null
+    { "id": "PaymentService", "name": "PaymentService", "team": "payments", "type": "service", "note": null, "repo": "acme/shop-platform", "language": "Java" },
+    { "id": "StripeAPI", "name": "StripeAPI", "team": "external", "type": "external", "note": null, "repo": null },
     {
       "id": "legacy-oms (unresolved)", "name": "legacy-oms (unresolved)", "team": "unknown", "type": "unknown",
-      "note": "RestTemplate call to a hostname with no matching Spring Boot service in scan scope."
+      "note": "RestTemplate call to a hostname with no matching Spring Boot service in scan scope.", "repo": null
     }
   ],
   "edges": [
@@ -73,9 +91,11 @@ Notes:
   registered schema); `likely` = inferred (config-resolved URL, `WebClient`); `uncertain` = guess
   (runtime variable host, no producer found).
 
-### 2. `GET /api/v1/contracts?repo=&branch=`
+### 2. `GET /api/v1/contracts` (optional `?repo=&service=&branch=&protocol=`)
 
-Field-level schemas can't be derived by the UI — the backend owns these.
+Field-level schemas can't be derived by the UI — the backend owns these. Account-scoped like
+`/graph`; with no params returns every contract the account owns. `repo`/`service` narrow to that
+repo's / service's contracts; `protocol` (`rest`|`kafka`) filters by kind.
 
 ```jsonc
 {
@@ -115,9 +135,10 @@ Field-level schemas can't be derived by the UI — the backend owns these.
 
 Field `note` is optional provenance text (e.g. `"added in c98d0aa"`) — the UI renders it verbatim.
 
-### 3. `GET /api/v1/commits?repo=&branch=&limit=20`
+### 3. `GET /api/v1/commits` (optional `?branch=&limit=20`)
 
-Architecture-relevant commits with their graph diffs.
+Architecture-relevant commits with their graph diffs. Account-scoped like `/graph`. **Currently
+returns `[]`** — the extractor doesn't send commit metadata yet, so no diffs are projected.
 
 ```jsonc
 [

@@ -55,6 +55,12 @@ export interface ServiceBody {
   service_id: string;
   service_name?: string;
   repository?: string;
+  /**
+   * Primary implementation language, if the extractor reports it (not sent by the extractor yet).
+   * Canonical casing expected — "Java", "Kotlin", "Go", "TypeScript", "Python" — so it matches the
+   * display strings in the read-model graph (common/types.ts NodeDto.language). Stored verbatim.
+   */
+  language?: string;
   endpoints: Endpoint[];
   outbound_dependencies: OutboundDependency[];
   kafka_producers: KafkaEdge[];

@@ -38,6 +38,8 @@ export interface NodeDto {
   note: string | null;
   /** Primary implementation language, canonical casing (e.g. "Java", "Kotlin"); null when not scanned/reported. */
   language?: string | null;
+  /** Owning repo for a service node, so the UI can group/filter by repo; null for external/unknown. */
+  repo?: string | null;
 }
 
 export interface EdgeDto {
@@ -52,10 +54,11 @@ export interface EdgeDto {
 }
 
 export interface GraphResponse {
-  repo: string;
+  /** The repo filter that was applied, or null when the whole account graph is returned. */
+  repo: string | null;
   branch: string;
-  /** ISO-8601. */
-  scannedAt: string;
+  /** ISO-8601, or null when the account has no scans yet (empty graph). */
+  scannedAt: string | null;
   teams: TeamDto[];
   nodes: NodeDto[];
   edges: EdgeDto[];
@@ -106,8 +109,7 @@ export interface ContractsResponse {
 }
 
 export type AnyContract =
-  | ({ kind: 'rest' } & EndpointContractDto)
-  | ({ kind: 'kafka' } & TopicContractDto);
+  ({ kind: 'rest' } & EndpointContractDto) | ({ kind: 'kafka' } & TopicContractDto);
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/commits (bare array)

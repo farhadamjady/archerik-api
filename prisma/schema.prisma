@@ -10,20 +10,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// A single immutable scan result for (repo, branch, commit). `data` holds { teams, nodes, edges }.
+/// The account-wide read graph for a branch: the union of every service baseline the account owns,
+/// projected on each ingest. One row per (account, branch) — overwritten in place, no history.
+/// `data` holds { teams, nodes, edges }; nodes carry their `repo` so the UI can filter by repo.
 model Graph {
   id        String   @id @default(uuid()) @db.Uuid
-  repo      String
+  accountId String   @map("account_id") @db.Uuid
   branch    String
   commitSha String   @map("commit_sha") @db.VarChar(40)
   scannedAt DateTime @map("scanned_at")
   data      Json     @db.JsonB
 
+  account   Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
   contracts Contract[]
   commits   Commit[]
 
-  @@unique([repo, branch, commitSha])
-  @@index([repo, branch, scannedAt])
+  @@unique([accountId, branch, commitSha])
+  @@index([accountId, branch, scannedAt])
   @@map("graphs")
 }
 
@@ -63,6 +66,7 @@ model Commit {
 /// An application user. Password is stored as a bcrypt hash; never returned to clients.
 model User {
   id           String   @id @default(uuid()) @db.Uuid
+  accountId    String   @map("account_id") @db.Uuid
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String
@@ -70,8 +74,10 @@ model User {
   team         String
   createdAt    DateTime @default(now()) @map("created_at")
 
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   sessions Session[]
 
+  @@index([accountId])
   @@map("users")
 }
 
@@ -103,6 +109,8 @@ model Account {
 
   apiKeys   ApiKey[]
   baselines ServiceBaseline[]
+  users     User[]
+  graphs    Graph[]
 
   @@map("accounts")
 }
@@ -131,6 +139,9 @@ model ServiceBaseline {
   accountId     String   @map("account_id") @db.Uuid
   serviceId     String   @map("service_id")
   serviceName   String?  @map("service_name")
+  /// Primary implementation language, if the extractor reports it (top-level `language` in the
+  /// Service body). Nullable — the current extractor doesn't send it yet.
+  language      String?  @map("language")
   defaultBranch String   @map("default_branch")
   sha           String?  @db.VarChar(40)
   body          Bytes

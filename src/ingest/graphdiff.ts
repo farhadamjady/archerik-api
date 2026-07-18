@@ -87,7 +87,10 @@ function diffCategory<T>(
   return out;
 }
 
-function compareEndpoint(b: Endpoint, h: Endpoint): {
+function compareEndpoint(
+  b: Endpoint,
+  h: Endpoint,
+): {
   changed: string[];
   schema_diff?: SchemaFieldDiff[];
 } {
@@ -111,7 +114,10 @@ function compareDependency(b: OutboundDependency, h: OutboundDependency): { chan
   return { changed };
 }
 
-function compareKafka(b: KafkaEdge, h: KafkaEdge): {
+function compareKafka(
+  b: KafkaEdge,
+  h: KafkaEdge,
+): {
   changed: string[];
   schema_diff?: SchemaFieldDiff[];
 } {

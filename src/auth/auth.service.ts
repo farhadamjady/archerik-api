@@ -43,7 +43,14 @@ export class AuthService {
     });
     if (!session || session.revokedAt || session.expiresAt <= new Date()) return null;
     const { user } = session;
-    return { id: user.id, email: user.email, name: user.name, handle: user.handle, team: user.team };
+    return {
+      id: user.id,
+      accountId: user.accountId,
+      email: user.email,
+      name: user.name,
+      handle: user.handle,
+      team: user.team,
+    };
   }
 
   /** Best-effort revoke — safe to call with an unknown/expired token. */
@@ -61,10 +68,19 @@ export class AuthService {
    */
   async ssoLogin(): Promise<string> {
     const email = process.env.SSO_DEMO_EMAIL ?? 'sso@acme.com';
+    // Every user belongs to an account (company). The stub attaches the SSO user to whichever
+    // account exists locally (creating a fallback one if the DB was never seeded). A real OIDC flow
+    // would map the IdP's org/tenant claim to the account instead.
+    const account =
+      (await this.prisma.account.findFirst({ orderBy: { createdAt: 'asc' } })) ??
+      (await this.prisma.account.create({
+        data: { name: 'SSO (demo)', expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000) },
+      }));
     const user = await this.prisma.user.upsert({
       where: { email },
       update: {},
       create: {
+        accountId: account.id,
         email,
         // Random hash — this account is only reachable via SSO, never password login.
         passwordHash: await bcrypt.hash(randomBytes(16).toString('hex'), 10),

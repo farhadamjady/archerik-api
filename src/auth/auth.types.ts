@@ -1,6 +1,8 @@
 /** The authenticated principal attached to each request by AuthGuard. */
 export interface AuthUser {
   id: string;
+  /** The account (company) this user belongs to — the scope of every read endpoint. */
+  accountId: string;
   email: string;
   name: string;
   handle: string;

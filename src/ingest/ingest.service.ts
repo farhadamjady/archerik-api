@@ -5,11 +5,12 @@ import {
   HttpStatus,
   Injectable,
 } from '@nestjs/common';
-import { Account } from '@prisma/client';
+import { Account, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { diffGraph } from './graphdiff';
 import { renderMarkdown } from './markdown';
 import { EMPTY_SERVICE, Entitlement, IngestResponse, ServiceBody } from './model';
+import { ParsedService, projectReadModel } from './project';
 import { resolveAll } from './resolve';
 
 /** Commit metadata the extractor sends in headers (body stays the pure graph). */
@@ -133,16 +134,23 @@ export class IngestService {
             accountId: account.id,
             serviceId,
             serviceName: head.service_name ?? null,
+            language: head.language ?? null,
             defaultBranch,
             sha: headers.sha ?? null,
             body: raw, // raw bytes, verbatim
           },
           update: {
             serviceName: head.service_name ?? null,
+            language: head.language ?? null,
             sha: headers.sha ?? null,
             body: raw,
           },
         });
+
+        // Rebuild the read model (graph + contracts) from every baseline the account owns, so a
+        // single ingest call is all it takes for /api/v1/graph and /api/v1/contracts to reflect the
+        // whole company's architecture. The UI queries by account (via session), not by repo.
+        await this.reprojectAccount(tx, account.id, defaultBranch, headers.sha ?? null);
       }
       await tx.account.update({
         where: { id: account.id },
@@ -158,6 +166,74 @@ export class IngestService {
       diff,
       markdown,
     };
+  }
+
+  /**
+   * Rebuilds the current-head Graph row (+ Contract rows) for an (account, branch) from the union
+   * of EVERY service baseline the account owns — across all repos. Overwrites in place — no history
+   * — since baselines hold one body per service, not a per-commit series. Runs inside the ingest
+   * transaction. Nodes carry their `repo` so the read layer can offer repo/service as filters.
+   */
+  private async reprojectAccount(
+    tx: Prisma.TransactionClient,
+    accountId: string,
+    branch: string,
+    headSha: string | null,
+  ): Promise<void> {
+    const rows = await tx.serviceBaseline.findMany({
+      where: { accountId, defaultBranch: branch },
+      select: { serviceId: true, serviceName: true, language: true, body: true },
+    });
+
+    const services: ParsedService[] = [];
+    const known = new Map<string, string>();
+    for (const r of rows) {
+      let body: ServiceBody;
+      try {
+        body = JSON.parse(Buffer.from(r.body).toString('utf8')) as ServiceBody;
+      } catch {
+        continue; // skip a corrupt baseline rather than fail the whole projection
+      }
+      services.push({
+        serviceId: r.serviceId,
+        serviceName: r.serviceName,
+        language: r.language,
+        repo: body.repository?.trim() || null,
+        body,
+      });
+      known.set(r.serviceId.toLowerCase(), r.serviceId);
+      if (r.serviceName) known.set(r.serviceName.toLowerCase(), r.serviceId);
+    }
+
+    const { graph, contracts } = projectReadModel(services, known);
+
+    // Delete-then-create keeps exactly one row per (account, branch); cascades old contracts/commits.
+    await tx.graph.deleteMany({ where: { accountId, branch } });
+    const created = await tx.graph.create({
+      data: {
+        accountId,
+        branch,
+        commitSha: headSha ?? 'HEAD',
+        scannedAt: new Date(),
+        data: graph as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    const contractRows = [
+      ...contracts.endpoints.map((e) => ({
+        graphId: created.id,
+        kind: 'rest',
+        data: e as unknown as Prisma.InputJsonValue,
+      })),
+      ...contracts.topics.map((t) => ({
+        graphId: created.id,
+        kind: 'kafka',
+        data: t as unknown as Prisma.InputJsonValue,
+      })),
+    ];
+    if (contractRows.length > 0) {
+      await tx.contract.createMany({ data: contractRows });
+    }
   }
 
   private async consumeQuota(accountId: string): Promise<void> {
