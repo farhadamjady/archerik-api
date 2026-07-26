@@ -210,11 +210,21 @@ is what arrives in `POST /ask` as `model`.
   feeds the sidebar user chip.
 - `POST /api/v1/auth/logout` — invalidate the token server-side; response body ignored
   (best-effort fire-and-forget from the UI).
-- `GET /api/v1/auth/sso` — full-page browser redirect target (not fetch). After the IdP dance,
-  the backend must land the browser back on the app with a valid token the UI can pick up —
-  simplest compatible option: redirect to `<app-url>` after setting `cartograph.token` via a
-  page that writes `sessionStorage` (see the stub in `dev-server.mjs`), or agree on a
-  `#token=<...>` fragment and we'll add the few lines of UI to read it.
+- **SSO (P1, real OIDC — supersedes the old bare-link stub; BREAKING for the UI, needs a small
+  change)**: SSO is multi-tenant (each account brings its own IdP) and routed by email domain, so
+  it's now a two-step flow instead of a bare link:
+  1. `POST /api/v1/auth/sso/start` — request `{ "email": "..." }`.
+     `200` → `{ "sso": true, "redirectUrl": "..." }` if the email's domain has SSO configured — the
+     UI does a full-page navigation (`location.href = redirectUrl`) to start the IdP dance.
+     `200` → `{ "sso": false }` if the domain has no SSO connection (or it's disabled) — same shape
+     either way, so the UI can't distinguish "no SSO" from "disabled" (deliberate, matches the
+     login form's existing "generic invalid credentials" stance — no account enumeration).
+     Falls back to the password form in the `{ "sso": false }` case.
+  2. `GET /api/v1/auth/sso/callback` — the IdP redirects the browser here directly; the UI never
+     calls this. On success it's still a full-page navigation that lands the browser back on the
+     app with `cartograph.token` written to `sessionStorage`, same as before. On failure it
+     redirects to `<app-url>?sso_error=1` instead of a token — the UI should check for that query
+     param on boot and show a generic "sign-in failed" message.
 
 Token format is the backend's choice (opaque vs JWT) — the UI never introspects it.
 

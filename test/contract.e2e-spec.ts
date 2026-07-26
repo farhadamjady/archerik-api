@@ -1,10 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import {
-  validateCommits,
-  validateContracts,
-  validateGraph,
-} from '../src/common/integrity';
+import { validateCommits, validateContracts, validateGraph } from '../src/common/integrity';
 import { createTestApp, login } from './e2e-utils';
 
 /**
@@ -64,8 +60,10 @@ describe('P0 API contract', () => {
       .query({ repo: REPO, branch: 'main', limit: 20 })
       .expect(200);
 
+    // Bare array, never a { commits: [...] } wrapper. In the account-scoped model the projection
+    // produces no commits yet (the extractor doesn't send commit metadata), so this is an empty
+    // array by design — the shape and ordering invariants must still hold.
     expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBeGreaterThan(0);
     const times = res.body.map((c: { when: string }) => new Date(c.when).getTime());
     expect(times).toEqual([...times].sort((a, b) => b - a));
     expect(validateCommits(res.body)).toEqual([]);
@@ -75,8 +73,11 @@ describe('P0 API contract', () => {
     await authed('/api/v1/graph').query({ repo: REPO, bogus: 'x' }).expect(400);
   });
 
-  it('404s for an unknown repo', async () => {
-    await authed('/api/v1/graph').query({ repo: 'nope/nope' }).expect(404);
+  it('unknown repo → 200 with an empty subset (account is the scope, repo is just a filter)', async () => {
+    const res = await authed('/api/v1/graph').query({ repo: 'nope/nope' }).expect(200);
+    expect(res.body.repo).toBe('nope/nope');
+    expect(res.body.nodes).toEqual([]);
+    expect(res.body.edges).toEqual([]);
   });
 
   it('401s without a token (protected endpoint)', async () => {

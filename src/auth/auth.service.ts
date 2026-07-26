@@ -15,7 +15,8 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private async createSession(userId: string): Promise<string> {
+  /** Mints an opaque, DB-backed session for a user — shared by password login and SsoService. */
+  async createSession(userId: string): Promise<string> {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + this.ttlHours * 3600 * 1000);
     await this.prisma.session.create({
@@ -60,35 +61,5 @@ export class AuthService {
       where: { tokenHash: this.hashToken(token), revokedAt: null },
       data: { revokedAt: new Date() },
     });
-  }
-
-  /**
-   * SSO stub: stands in for the IdP dance. Upserts a demo SSO user and mints a session so the
-   * browser lands back on the app already authenticated. Replace with a real OIDC flow later.
-   */
-  async ssoLogin(): Promise<string> {
-    const email = process.env.SSO_DEMO_EMAIL ?? 'sso@acme.com';
-    // Every user belongs to an account (company). The stub attaches the SSO user to whichever
-    // account exists locally (creating a fallback one if the DB was never seeded). A real OIDC flow
-    // would map the IdP's org/tenant claim to the account instead.
-    const account =
-      (await this.prisma.account.findFirst({ orderBy: { createdAt: 'asc' } })) ??
-      (await this.prisma.account.create({
-        data: { name: 'SSO (demo)', expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000) },
-      }));
-    const user = await this.prisma.user.upsert({
-      where: { email },
-      update: {},
-      create: {
-        accountId: account.id,
-        email,
-        // Random hash — this account is only reachable via SSO, never password login.
-        passwordHash: await bcrypt.hash(randomBytes(16).toString('hex'), 10),
-        name: 'SSO User',
-        handle: 'sso',
-        team: 'platform',
-      },
-    });
-    return this.createSession(user.id);
   }
 }

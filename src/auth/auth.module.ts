@@ -1,14 +1,25 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 import { MeController } from './me.controller';
+import { SsoClientRegistry } from './sso/sso-client-registry.service';
+import { SsoService } from './sso/sso.service';
 
 @Module({
+  imports: [
+    // Not registered as APP_GUARD — only POST /auth/sso/start opts in via @UseGuards(ThrottlerGuard),
+    // so this doesn't touch the separate /v1/* extractor quota system. Limit is generous enough for
+    // a legitimate user retrying a typo'd email a few times, while still blunting bulk domain probing.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
+  ],
   controllers: [AuthController, MeController],
   providers: [
     AuthService,
+    SsoService,
+    SsoClientRegistry,
     // Registered globally: every route is protected unless marked @Public().
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

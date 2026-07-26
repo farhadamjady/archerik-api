@@ -41,16 +41,18 @@ curl 'http://localhost:3000/api/v1/graph?repo=acme/shop-platform&branch=main' \
 
 ## Auth (P1)
 
-Every route requires `Authorization: Bearer <token>` except `POST /auth/login`, `GET /auth/sso`,
-and `GET /health` (marked `@Public()`). Any protected route returns `401` when the token is
-missing/expired/revoked — which the UI treats globally as "session expired".
+Every route requires `Authorization: Bearer <token>` except `POST /auth/login`,
+`POST /auth/sso/start`, `GET /auth/sso/callback`, and `GET /health` (marked `@Public()`). Any
+protected route returns `401` when the token is missing/expired/revoked — which the UI treats
+globally as "session expired".
 
 | Method & path | Notes |
 |---|---|
 | `POST /auth/login` | `{ email, password }` → `{ token, user: { name, handle, team } }`; `401` on bad creds |
 | `GET /me` | session restore → `{ name, handle, team }`; `401` if token invalid |
 | `POST /auth/logout` | revokes the token server-side; best-effort, body ignored |
-| `GET /auth/sso` | browser redirect target — returns an HTML page that stores the token and redirects to `APP_URL` |
+| `POST /auth/sso/start` | `{ email }` → `{ sso: true, redirectUrl }` or `{ sso: false }` (same shape either way — no domain enumeration); rate-limited |
+| `GET /auth/sso/callback` | IdP redirect target — on success, an HTML page that stores the token and redirects to `APP_URL`; on failure, redirects to `APP_URL?sso_error=1` |
 
 Tokens are **opaque, DB-backed sessions** (not JWT), stored as a SHA-256 hash; logout revokes them
 server-side. Passwords are bcrypt-hashed. Demo login (from the seed): **`demo@acme.com` / `demo1234`**.
@@ -60,6 +62,27 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"demo@acme.com","password":"demo1234"}' | jq -r .token)
 ```
+
+### SSO (real OIDC, multi-tenant)
+
+Each account brings its own IdP (`SsoConnection`, discovered via OIDC's
+`/.well-known/openid-configuration`), routed by email domain (`SsoDomain`). Login is
+`POST /auth/sso/start` → full-page redirect to the IdP → `GET /auth/sso/callback` completes the
+Authorization Code + PKCE exchange, JIT-provisions or links the `User` under the connection's
+account, and mints a session the same way password login does. See
+`src/auth/sso/sso.service.ts` for the JIT/link/reject rules (an email that already belongs to a
+*different* account is always rejected — never silently reassigned).
+
+Env vars: `BACKEND_PUBLIC_URL` (this backend's externally reachable URL — every tenant's IdP
+registers `${BACKEND_PUBLIC_URL}/api/v1/auth/sso/callback` as the redirect URI),
+`SSO_ENCRYPTION_KEY` (32-byte base64, `openssl rand -base64 32` — encrypts each connection's OIDC
+client secret at rest; no default, fails closed if unset), `SSO_STATE_TTL_MINUTES`.
+
+No live IdP needed for testing — `test/sso-fixtures.ts` stands up a mock IdP by overriding
+`globalThis.fetch` for the three URLs `openid-client` calls (discovery/jwks/token), so real
+signature/iss/aud/nonce validation runs against real crypto. Run via `npm run test:e2e`, which
+passes Node's `--experimental-vm-modules` flag — required for `openid-client`'s dynamic ESM import
+to work inside Jest's sandboxed test context (see the comment in `src/auth/sso/oidc-client.ts`).
 
 ## Extractor control plane (`/v1`)
 
@@ -107,10 +130,11 @@ payload that would trip the UI can't ship.
 ## Tests
 
 ```bash
-npx jest --config ./test/jest-e2e.json   # boots the app against the seeded DB
+npm run test:e2e   # boots the app against the seeded DB
 ```
 
-Requires Postgres up and the seed loaded.
+Requires Postgres up and the seed loaded. Runs Jest with Node's `--experimental-vm-modules` flag —
+needed for the SSO tests' dynamic import of `openid-client` (ESM-only) to work inside Jest.
 
 ## Layout
 
@@ -121,7 +145,8 @@ prisma/
   seed.ts            # validates then persists
 src/
   common/            # enums, wire types, query DTOs, graph lookup, integrity checks
-  auth/              # login/me/logout/sso, global AuthGuard, @Public() decorator
+  auth/              # login/me/logout, global AuthGuard, @Public() decorator
+  auth/sso/          # real OIDC SSO: discovery/PKCE client, JIT/link/reject, secret encryption
   ingest/            # extractor /v1 control plane: API-key guard, ingest + graphdiff + markdown
   graph/ contracts/ commits/   # the three P0 modules
   health/  prisma/

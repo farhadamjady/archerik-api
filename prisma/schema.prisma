@@ -45,17 +45,17 @@ model Contract {
 
 /// Architecture-relevant commit with its graph diff. `changes` holds the change records array.
 model Commit {
-  id          String   @id @default(uuid()) @db.Uuid
-  graphId     String   @map("graph_id") @db.Uuid
-  commitSha   String   @map("commit_sha") @db.VarChar(40)
-  authorName  String   @map("author_name")
-  authorHandle String? @map("author_handle")
-  authorEmail String?  @map("author_email")
-  message     String
-  pr          String?
-  branch      String?
-  when        DateTime
-  changes     Json     @db.JsonB
+  id           String   @id @default(uuid()) @db.Uuid
+  graphId      String   @map("graph_id") @db.Uuid
+  commitSha    String   @map("commit_sha") @db.VarChar(40)
+  authorName   String   @map("author_name")
+  authorHandle String?  @map("author_handle")
+  authorEmail  String?  @map("author_email")
+  message      String
+  pr           String?
+  branch       String?
+  when         DateTime
+  changes      Json     @db.JsonB
 
   graph Graph @relation(fields: [graphId], references: [id], onDelete: Cascade)
 
@@ -104,13 +104,19 @@ model Account {
   name           String
   plan           String   @default("mvp")
   quotaRemaining Int      @default(1000000) @map("quota_remaining")
+  /// Max distinct services this account may hold (a pricing tier limit). Admin-provisioned per
+  /// account; the ingest gate rejects a NEW service once the account is at this many services.
+  /// Default is the entry tier; larger accounts are bumped (e.g. 75) by an admin.
+  maxServices    Int      @default(20) @map("max_services")
   expiresAt      DateTime @map("expires_at")
   createdAt      DateTime @default(now()) @map("created_at")
 
-  apiKeys   ApiKey[]
-  baselines ServiceBaseline[]
-  users     User[]
-  graphs    Graph[]
+  apiKeys       ApiKey[]
+  baselines     ServiceBaseline[]
+  users         User[]
+  graphs        Graph[]
+  scans         Scan[]
+  ssoConnection SsoConnection?
 
   @@map("accounts")
 }
@@ -133,10 +139,16 @@ model ApiKey {
 
 /// The stored per-service baseline for diffing. `body` holds the extractor's byte-stable Service
 /// JSON VERBATIM (raw bytes) — the "unchanged" fast path is bytes.Equal(body, incoming), so we must
-/// never re-marshal. One baseline per (account, service_id, default_branch).
+/// never re-marshal. One baseline per (account, repository, service_id, default_branch): `service_id`
+/// is just the repo's directory name and is NOT globally unique (every repo has an `order-service`),
+/// so `repository` is part of the key to stop cross-repo baselines from clobbering one another.
 model ServiceBaseline {
   id            String   @id @default(uuid()) @db.Uuid
   accountId     String   @map("account_id") @db.Uuid
+  /// Owning repository (from the Service body's `repository`); stable per repo. Empty string when
+  /// the extractor doesn't report one — kept NOT NULL so the uniqueness key stays intact (Postgres
+  /// treats NULLs as distinct, which would let repo-less rescans pile up duplicate baselines).
+  repository    String   @default("") @map("repository")
   serviceId     String   @map("service_id")
   serviceName   String?  @map("service_name")
   /// Primary implementation language, if the extractor reports it (top-level `language` in the
@@ -149,21 +161,93 @@ model ServiceBaseline {
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  @@unique([accountId, serviceId, defaultBranch])
+  @@unique([accountId, repository, serviceId, defaultBranch])
   @@index([accountId])
+  @@index([accountId, repository])
   @@map("service_baselines")
 }
 
-/// Scan jobs (P2). Present for schema completeness; not used by the P0 API.
-model Scan {
-  id          String    @id @default(uuid()) @db.Uuid
-  repo        String
-  branch      String
-  status      String // 'queued' | 'in_progress' | 'complete' | 'failed'
-  startedAt   DateTime? @map("started_at")
-  completedAt DateTime? @map("completed_at")
-  results     Json?     @db.JsonB
-  error       String?
+/// A per-account OIDC identity provider (SSO login, P1 — replaces the old ssoLogin() stub). Each
+/// Account brings its own IdP rather than sharing one global IdP, so login can be routed by the
+/// user's email domain to the right tenant's connection.
+/// `clientSecretEnc` is *encrypted*, not hashed like ApiKey.keyHash/Session.tokenHash: those are
+/// bearer credentials presented BY a client, so the backend only ever needs to compare them. An OIDC
+/// client secret is presented BACK to the IdP's token endpoint on every callback, so it must be
+/// reversible — AES-256-GCM via src/auth/sso/sso-crypto.ts, keyed by SSO_ENCRYPTION_KEY.
+model SsoConnection {
+  id              String   @id @default(uuid()) @db.Uuid
+  accountId       String   @unique @map("account_id") @db.Uuid
+  /// OIDC issuer URL; discovery hits `{issuer}/.well-known/openid-configuration`.
+  issuer          String
+  clientId        String   @map("client_id")
+  clientSecretEnc Bytes    @map("client_secret_enc")
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
+  account      Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  domains      SsoDomain[]
+  authRequests SsoAuthRequest[]
+
+  @@map("sso_connections")
+}
+
+/// Routes a login email's domain to its account's SsoConnection. `domain` is globally unique — a
+/// domain maps to exactly one account. Split from SsoConnection (rather than a domain column on it)
+/// so one IdP config can cover multiple verified domains (e.g. acme.com + acme.io) without
+/// duplicating the encrypted secret. Stored lowercase; the app normalizes before writing/reading.
+model SsoDomain {
+  id           String   @id @default(uuid()) @db.Uuid
+  connectionId String   @map("connection_id") @db.Uuid
+  domain       String   @unique
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  connection SsoConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId])
+  @@map("sso_domains")
+}
+
+/// A single in-flight OIDC login attempt: the CSRF `state`, replay `nonce`, and PKCE
+/// `codeVerifier`, stashed server-side for the redirect round-trip to the IdP and back. DB-backed
+/// and single-use (deleted on first read at the callback) rather than a signed/stateless token —
+/// same rationale as Session being DB-backed, and there's no Redis in this stack to hold short-lived
+/// state instead. `state` is the primary key: opaque and random (like createSession's token), never
+/// a sequential id, so it can't be guessed.
+model SsoAuthRequest {
+  state        String   @id
+  connectionId String   @map("connection_id") @db.Uuid
+  nonce        String
+  codeVerifier String   @map("code_verifier")
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime @map("expires_at")
+
+  connection SsoConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("sso_auth_requests")
+}
+
+/// One row per /v1/ingest call — the account's scan history / metering log. Written on every
+/// ingest (success, unchanged, or rejected) so usage is auditable per account over time. This is
+/// distinct from the account-wide Graph read model, which is overwritten in place with no history.
+model Scan {
+  id              String   @id @default(uuid()) @db.Uuid
+  accountId       String   @map("account_id") @db.Uuid
+  serviceId       String   @map("service_id")
+  branch          String
+  sha             String?  @db.VarChar(40)
+  /// 'complete' (baseline written / diffed) | 'unchanged' (byte-identical) | 'failed' (rejected).
+  status          String
+  firstScan       Boolean  @default(false) @map("first_scan")
+  baselineUpdated Boolean  @default(false) @map("baseline_updated")
+  /// Summary of what the scan produced: { added, removed, changed, servicesTotal }. Null on failure.
+  results         Json?    @db.JsonB
+  error           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
   @@map("scans")
 }

@@ -1,14 +1,22 @@
-import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { extractBearer } from './auth.guard';
 import { Public } from './decorators/public.decorator';
 import { LoginDto } from './dto/login.dto';
+import { SsoStartDto } from './dto/sso-start.dto';
 import { LoginResponse } from './auth.types';
+import { SsoService } from './sso/sso.service';
+import { SsoStartResponse } from './sso/sso.types';
+import { ssoErrorHtml, ssoRedirectHtml } from './sso/sso-html';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly ssoService: SsoService,
+  ) {}
 
   @Public()
   @Post('login')
@@ -26,22 +34,38 @@ export class AuthController {
   }
 
   /**
-   * SSO redirect target — a full-page browser navigation, not a fetch. Mints a token and returns a
-   * tiny page that writes it to sessionStorage['cartograph.token'] then redirects to APP_URL, so no
-   * UI changes are needed (the contract's preferred option).
+   * Step 1 of SSO: resolves the account's IdP by email domain and returns a redirect URL. Rate
+   * limited — this is the one route whose whole purpose is "tell me if this company uses SSO", so
+   * it's the enumeration-risk surface.
    */
   @Public()
-  @Get('sso')
-  async sso(@Res() res: Response): Promise<void> {
-    const token = await this.authService.ssoLogin();
-    const appUrl = process.env.APP_URL ?? 'http://localhost:5173';
-    const payload = JSON.stringify(token);
-    const target = JSON.stringify(appUrl);
-    res.type('html').send(
-      `<!doctype html><meta charset="utf-8"><title>Signing in…</title><script>
-try { sessionStorage.setItem('cartograph.token', ${payload}); } catch (e) {}
-location.replace(${target});
-</script>Signing you in…`,
-    );
+  @UseGuards(ThrottlerGuard)
+  @Post('sso/start')
+  start(@Body() dto: SsoStartDto): Promise<SsoStartResponse> {
+    return this.ssoService.start(dto.email);
+  }
+
+  /**
+   * Step 2 of SSO: the IdP redirects the browser back here with `code`/`state`. Full-page browser
+   * navigation, not a fetch — on success, returns a tiny page that writes the token to
+   * sessionStorage['cartograph.token'] then redirects to APP_URL, so no UI changes are needed. Any
+   * failure (bad/expired state, IdP error=, claim validation) renders a generic error page instead
+   * — never a silent logged-in-anyway result.
+   */
+  @Public()
+  @Get('sso/callback')
+  async ssoCallback(
+    // Deliberately untyped, unlike other @Query() routes' DTOs: this is a redirect target the IdP
+    // controls, and some providers append extra params (e.g. session_state) the global
+    // ValidationPipe's forbidNonWhitelisted would otherwise reject.
+    @Query() query: Record<string, string | undefined>,
+    @Res() res: Response,
+  ): Promise<void> {
+    try {
+      const token = await this.ssoService.callback(query);
+      res.type('html').send(ssoRedirectHtml(token));
+    } catch {
+      res.type('html').send(ssoErrorHtml());
+    }
   }
 }

@@ -69,10 +69,4 @@ describe('P1 auth', () => {
     // Same token no longer works — server-side revocation, not just a client-side discard.
     await request(app.getHttpServer()).get('/api/v1/me').set('Authorization', auth).expect(401);
   });
-
-  it('GET /auth/sso — returns an HTML page that stores the token and redirects', async () => {
-    const res = await request(app.getHttpServer()).get('/api/v1/auth/sso').expect(200);
-    expect(res.headers['content-type']).toContain('text/html');
-    expect(res.text).toContain("sessionStorage.setItem('cartograph.token'");
-  });
 });
