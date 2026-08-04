@@ -14,9 +14,8 @@ import {
   GraphDiff,
   KafkaEdge,
   OutboundDependency,
-  SchemaField,
+  Schema,
   SchemaFieldDiff,
-  SchemaType,
   ServiceBody,
 } from './model';
 
@@ -25,28 +24,81 @@ export const dependencyKey = (d: OutboundDependency): string => `${d.target_name
 export const kafkaKey = (k: KafkaEdge, direction: 'producer' | 'consumer'): string =>
   `${k.topic}|${direction}`;
 
-/** Compare two schemas by field name (one level; nested handled recursively). */
-function diffSchema(base?: SchemaType, head?: SchemaType): SchemaFieldDiff[] {
+/**
+ * The type facet of a schema node — what a "type change" is judged on (BACKEND_CONTRACT.md §5):
+ * arrays fold in their element type, maps their key/value types, so `array<Line>`→`array<Item>` or
+ * `map<String,A>`→`map<String,B>` register as changes even though `type` ("array"/"map") is unchanged.
+ */
+function typeFacet(f: Schema): string {
+  if (f.type === 'array') return `array<${f.items ?? '?'}>`;
+  if (f.type === 'map') return `map<${f.key_type ?? '?'},${f.value_type ?? '?'}>`;
+  return f.type;
+}
+
+const canonConstraints = (c?: Record<string, string>): string =>
+  c ? JSON.stringify(Object.fromEntries(Object.entries(c).sort())) : '';
+
+/** Attribute axes that differ between two same-path, same-type nodes (order stable for byte-equality). */
+function changedAttrs(b: Schema, h: Schema): string[] {
+  const attrs: string[] = [];
+  if (Boolean(b.nullable) !== Boolean(h.nullable)) attrs.push('nullable');
+  if ((b.required ?? 'unknown') !== (h.required ?? 'unknown')) attrs.push('required');
+  // enum order is significant (declaration order) — compare positionally, never sorted.
+  if (JSON.stringify(b.enum ?? null) !== JSON.stringify(h.enum ?? null)) attrs.push('enum');
+  if (canonConstraints(b.constraints) !== canonConstraints(h.constraints)) attrs.push('constraints');
+  if ((b.confidence ?? '') !== (h.confidence ?? '')) attrs.push('confidence');
+  if (Boolean(b.truncated) !== Boolean(h.truncated)) attrs.push('truncated');
+  return attrs;
+}
+
+/**
+ * Field-path diff of two schemas (BACKEND_CONTRACT.md §5/§4a). Recurses to the truncation boundary;
+ * each node is keyed by its wire-name path from the edge root (`""` = root). A path on one side only
+ * is add/remove; a differing type facet is a type change; a same-type node with a differing attribute
+ * is an attribute change. Wire names are unique within a `nested` list, so name is a safe key.
+ */
+function diffSchema(base?: Schema, head?: Schema): SchemaFieldDiff[] {
   const diffs: SchemaFieldDiff[] = [];
-  const walk = (b: SchemaField[] = [], h: SchemaField[] = []): void => {
-    const byName = (fs: SchemaField[]): Map<string, SchemaField> =>
-      new Map(fs.map((f) => [f.name, f]));
+
+  // Root node itself (the request/response/message type). A present↔absent whole schema surfaces via
+  // the field-level add/removes below, so only compare the root when BOTH sides have one.
+  if (base && head) {
+    const from = typeFacet(base);
+    const to = typeFacet(head);
+    if (from !== to) diffs.push({ op: 'change', path: '', from, to });
+    else {
+      const attrs = changedAttrs(base, head);
+      if (attrs.length) diffs.push({ op: 'change', path: '', attrs });
+    }
+  }
+
+  const byName = (fs: Schema[]): Map<string, Schema> => new Map(fs.map((f) => [f.name ?? '', f]));
+  const walk = (prefix: string, b: Schema[] = [], h: Schema[] = []): void => {
     const bm = byName(b);
     const hm = byName(h);
     for (const [name, hf] of hm) {
+      const path = prefix + name;
       const bf = bm.get(name);
       if (!bf) {
-        diffs.push({ op: 'add', name, type: hf.type });
-      } else if (bf.type !== hf.type) {
-        diffs.push({ op: 'change', name, from: bf.type, to: hf.type });
+        diffs.push({ op: 'add', path, type: typeFacet(hf) });
+        continue;
       }
-      if (bf) walk(bf.nested, hf.nested);
+      const from = typeFacet(bf);
+      const to = typeFacet(hf);
+      if (from !== to) diffs.push({ op: 'change', path, from, to });
+      else {
+        const attrs = changedAttrs(bf, hf);
+        if (attrs.length) diffs.push({ op: 'change', path, attrs });
+      }
+      // Descend into object children AND hoisted array-of-object element fields.
+      const childPrefix = `${path}${hf.type === 'array' ? '[]' : ''}.`;
+      walk(childPrefix, bf.nested, hf.nested);
     }
     for (const [name, bf] of bm) {
-      if (!hm.has(name)) diffs.push({ op: 'remove', name, type: bf.type });
+      if (!hm.has(name)) diffs.push({ op: 'remove', path: prefix + name, type: typeFacet(bf) });
     }
   };
-  walk(base?.nested, head?.nested);
+  walk('', base?.nested, head?.nested);
   return diffs;
 }
 

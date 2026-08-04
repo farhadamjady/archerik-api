@@ -17,7 +17,13 @@ describe('extractor /v1 control plane', () => {
       service_id: serviceId,
       service_name: `${serviceId}-service`,
       endpoints: [
-        { method: 'GET', path: '/x/{id}', protocol: 'rest', detection: 'annotation', confidence: 'confirmed' },
+        {
+          method: 'GET',
+          path: '/x/{id}',
+          protocol: 'rest',
+          detection: 'annotation',
+          confidence: 'confirmed',
+        },
       ],
       outbound_dependencies: extraDeps,
       kafka_producers: [],
@@ -40,7 +46,10 @@ describe('extractor /v1 control plane', () => {
         .post('/v1/auth/validate')
         .set('Authorization', auth)
         .expect(200);
-      expect(res.body).toMatchObject({ plan: expect.any(String), quota_remaining: expect.any(Number) });
+      expect(res.body).toMatchObject({
+        plan: expect.any(String),
+        quota_remaining: expect.any(Number),
+      });
       expect(typeof res.body.expires_at).toBe('string');
     });
 
@@ -102,7 +111,17 @@ describe('extractor /v1 control plane', () => {
         .set('Content-Type', 'application/json')
         .set('X-EKG-Branch', 'feat/x')
         .set('X-EKG-Default-Branch', 'main')
-        .send(body([{ target_name: 'other-svc', protocol: 'rest', detection: 'feign', confidence: 'confirmed', resolved: false }]))
+        .send(
+          body([
+            {
+              target_name: 'other-svc',
+              protocol: 'rest',
+              detection: 'feign',
+              confidence: 'confirmed',
+              resolved: false,
+            },
+          ]),
+        )
         .expect(200);
       expect(pr.body.first_scan).toBe(false);
       expect(pr.body.baseline_updated).toBe(false);

@@ -28,7 +28,7 @@ const isUrl = (s: string): boolean => /:\/\//.test(s) || s.includes('/');
 
 /** Match candidates for one raw target string: the raw name if it's a bare service name, else the
  *  URL's hostname and its first DNS label (k8s: payment-service.prod.svc -> payment-service). */
-function candidatesFor(raw: string): string[] {
+export function candidatesFor(raw: string): string[] {
   if (!raw) return [];
   if (!isUrl(raw)) return [raw];
   const host = hostnameOf(raw);
@@ -63,7 +63,9 @@ export function externalKey(dep: OutboundDependency): string {
   return (host || name).toLowerCase();
 }
 
-/** Build target_resolutions for every outbound dependency in the head graph. */
+/** Build target_resolutions for every outbound dependency: its identity key -> a known `service_id`
+ *  (from the fleet registry) or `"external"`. Name-only resolution (BACKEND_CONTRACT.md §6) — the
+ *  extractor emits a raw `target_name` and never guesses the service_id, so that mapping is ours. */
 export function resolveAll(
   deps: OutboundDependency[],
   known: Map<string, string>,

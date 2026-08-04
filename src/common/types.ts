@@ -5,15 +5,7 @@
  * (deg/inDeg/outDeg) or wrappers it doesn't expect (e.g. a { commits: [...] } envelope).
  */
 
-import {
-  ChangeKind,
-  ChangeOp,
-  Confidence,
-  ContractKind,
-  EdgeMethod,
-  NodeType,
-  Protocol,
-} from './enums';
+import { ChangeKind, ChangeOp, Confidence, ContractKind, NodeType, Protocol } from './enums';
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/graph
@@ -34,12 +26,22 @@ export interface NodeDto {
   /** Always present, including "external" / "unknown" for those node types. */
   team: string;
   type: NodeType;
-  /** Human-readable explanation, required for unknown nodes; null otherwise. */
+  /** Human-readable explanation, required for unknown AND deployment nodes; null otherwise. */
   note: string | null;
   /** Primary implementation language, canonical casing (e.g. "Java", "Kotlin"); null when not scanned/reported. */
   language?: string | null;
-  /** Owning repo for a service node, so the UI can group/filter by repo; null for external/unknown. */
+  /**
+   * Repository slug — the catalog's primary label for a service box and the `org/<repo>` header
+   * (e.g. "payment-service"). Sent for service/external nodes; null for unknown/deployment. This is
+   * the per-service repo slug, NOT the owning system/org (that is GraphResponse.org).
+   */
   repo?: string | null;
+  /**
+   * The host a caller uses to reach this node: the service slug for internal services, the real
+   * third-party host for externals (e.g. "api.stripe.com"), the proven deploy host for deployment
+   * nodes. null when genuinely unknown (unresolved runtime target).
+   */
+  host?: string | null;
 }
 
 export interface EdgeDto {
@@ -47,13 +49,16 @@ export interface EdgeDto {
   from: string;
   to: string;
   protocol: Protocol;
-  method: EdgeMethod;
+  /** Free display string — NOT validated by the UI (FeignClient|WebClient|RestTemplate|route|@KafkaListener|HttpExchange|CloudStream…). */
+  method: string;
   confidence: Confidence;
   /** Endpoint (verb + path) for rest, topic name for kafka. */
   label: string;
 }
 
 export interface GraphResponse {
+  /** Organisation/system the catalog belongs to (sidebar "organisation"); null when it can't be derived. */
+  org: string | null;
   /** The repo filter that was applied, or null when the whole account graph is returned. */
   repo: string | null;
   branch: string;
@@ -68,12 +73,39 @@ export interface GraphResponse {
 // GET /api/v1/contracts
 // ---------------------------------------------------------------------------
 
+/**
+ * One node of a request/response/message schema. Recursive: a field whose type is a DTO carries its
+ * children in `nested`, up to the extractor's truncation boundary. The wire shape mirrors the
+ * extractor's `Schema` (BACKEND_CONTRACT.md §4a) — the backend passes it through VERBATIM (never
+ * flattens, never synthesizes), so the UI renders nested tables, enum/constraint chips, and
+ * collapsed-truncation nodes directly. Only non-empty keys are emitted (`name`/`type`/`nullable`
+ * always present; `note` kept for provenance).
+ */
 export interface FieldDto {
   name: string;
+  /** JSON primitive (`string|integer|number|boolean|object|array|map|void`) or a DTO type NAME. */
   type: string;
+  /** May the value be null (distinct from `required`). */
   nullable: boolean;
   /** Optional provenance text (e.g. "added in c98d0aa"); rendered verbatim. */
   note: string | null;
+  /** Tri-state presence, distinct from `nullable`. */
+  required?: 'required' | 'optional' | 'unknown';
+  /** Arrays: element type name (array-of-object also hoists the element's fields into `nested`). */
+  items?: string;
+  /** Maps: key/value type names (values are named, not expanded). */
+  key_type?: string;
+  value_type?: string;
+  /** Walk stopped here — render as "<type> (collapsed)", never as empty. */
+  truncated?: boolean;
+  /** Enum members in declaration order — do NOT re-sort. Missing ⇒ "not captured", not "no members". */
+  enum?: string[];
+  /** Validation metadata (string→string, e.g. {"maxLength":"10"}). Tolerate unknown keys. */
+  constraints?: Record<string, string>;
+  /** Per-node detection certainty; may degrade below the edge's confidence for an opaque subtree. */
+  confidence?: Confidence;
+  /** Child fields (object) or hoisted element fields (array-of-object). */
+  nested?: FieldDto[];
 }
 
 export interface EndpointContractDto {
@@ -84,7 +116,8 @@ export interface EndpointContractDto {
   path: string;
   source: string;
   confidence: Confidence;
-  method: EdgeMethod;
+  /** Free display string — not validated by the UI (see EdgeDto.method). */
+  method: string;
   unresolved: boolean;
   callers: string[];
   request: FieldDto[];

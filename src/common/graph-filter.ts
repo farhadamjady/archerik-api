@@ -5,6 +5,8 @@
 import { EdgeDto, NodeDto, TeamDto } from './types';
 
 export interface StoredGraphData {
+  /** Organisation/system the catalog belongs to; may be absent on graphs projected before org existed. */
+  org?: string | null;
   teams: TeamDto[];
   nodes: NodeDto[];
   edges: EdgeDto[];
@@ -63,7 +65,7 @@ export function filterGraph(data: StoredGraphData, filter: GraphFilter): Filtere
   const teams = data.teams.filter((t) => usedTeams.has(t.id));
 
   return {
-    data: { teams, nodes: keptNodes, edges: keptEdges },
+    data: { org: data.org, teams, nodes: keptNodes, edges: keptEdges },
     focusServiceIds,
   };
 }

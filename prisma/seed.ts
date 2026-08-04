@@ -84,8 +84,13 @@ async function seedExtractorAccount(): Promise<string> {
 // representative: confirmed/likely/uncertain edges, an external target, a runtime-URL unknown, and
 // two Kafka topics — enough to exercise every branch of the projection.
 
-const DEMO_REPO = 'acme/shop-platform';
+// The catalog is repo-centric (one repository per service). The extractor emits `repository`
+// per-service as `<system>/<serviceId>`, so the shared system here is `github.com/acme` → org "acme",
+// and each service's own repo slug is its serviceId (payment-service, …). `repoFor` builds the
+// per-service repository the same way the extractor would.
+const DEMO_SYSTEM = 'github.com/acme';
 const DEMO_BRANCH = 'main';
+const repoFor = (serviceId: string): string => `${DEMO_SYSTEM}/${serviceId}`;
 
 const DEMO_FLEET: Array<{
   serviceId: string;
@@ -100,7 +105,6 @@ const DEMO_FLEET: Array<{
     body: {
       service_id: 'checkout-orchestrator',
       service_name: 'CheckoutOrchestrator',
-      repository: DEMO_REPO,
       endpoints: [
         {
           method: 'POST',
@@ -141,7 +145,6 @@ const DEMO_FLEET: Array<{
     body: {
       service_id: 'payment-service',
       service_name: 'PaymentService',
-      repository: DEMO_REPO,
       endpoints: [
         {
           method: 'POST',
@@ -157,12 +160,78 @@ const DEMO_FLEET: Array<{
               { name: 'currency', type: 'string(3)', required: 'required' },
             ],
           },
+          // Showcases the full §4a nested-entity contract: a nested object truncated at depth 2,
+          // an array-of-object (element fields hoisted), a map, an enum (declaration order), and
+          // per-field constraints — all sorted by wire name, as the extractor emits them.
           response: {
-            type: 'object',
+            type: 'PaymentResponse',
+            required: 'required',
+            confidence: 'confirmed',
             nested: [
-              { name: 'paymentId', type: 'UUID', required: 'required' },
-              { name: 'status', type: 'enum(AUTHORIZED,CAPTURED,FAILED)', required: 'required' },
-              { name: 'gatewayRef', type: 'string', required: 'optional' },
+              {
+                name: 'amount',
+                type: 'decimal',
+                required: 'required',
+                confidence: 'confirmed',
+                constraints: { minimum: '0' },
+              },
+              {
+                name: 'customer',
+                type: 'Customer',
+                required: 'required',
+                confidence: 'confirmed',
+                nested: [
+                  // depth-2 boundary → truncated, names the type, no `nested`.
+                  {
+                    name: 'address',
+                    type: 'Address',
+                    required: 'unknown',
+                    truncated: true,
+                    confidence: 'confirmed',
+                  },
+                  {
+                    name: 'name',
+                    type: 'string',
+                    required: 'required',
+                    confidence: 'confirmed',
+                    constraints: { maxLength: '120' },
+                  },
+                ],
+              },
+              {
+                name: 'gatewayRef',
+                type: 'string',
+                nullable: true,
+                required: 'optional',
+                confidence: 'confirmed',
+              },
+              {
+                name: 'labels',
+                type: 'map',
+                key_type: 'String',
+                value_type: 'string',
+                required: 'unknown',
+                confidence: 'confirmed',
+              },
+              {
+                name: 'lines',
+                type: 'array',
+                items: 'LineItem',
+                required: 'required',
+                confidence: 'confirmed',
+                nested: [
+                  { name: 'qty', type: 'integer', required: 'required', confidence: 'confirmed' },
+                  { name: 'sku', type: 'string', required: 'required', confidence: 'confirmed' },
+                ],
+              },
+              { name: 'paymentId', type: 'UUID', required: 'required', confidence: 'confirmed' },
+              {
+                name: 'status',
+                type: 'string',
+                required: 'required',
+                confidence: 'confirmed',
+                enum: ['AUTHORIZED', 'CAPTURED', 'FAILED'],
+              },
             ],
           },
         },
@@ -204,7 +273,6 @@ const DEMO_FLEET: Array<{
     body: {
       service_id: 'order-service',
       service_name: 'OrderService',
-      repository: DEMO_REPO,
       endpoints: [
         {
           method: 'GET',
@@ -259,38 +327,41 @@ const DEMO_FLEET: Array<{
  * violation, so the seed can never ship a payload the UI would reject.
  */
 async function seedDemoGraph(accountId: string): Promise<void> {
-  await prisma.serviceBaseline.deleteMany({
-    where: { accountId, repository: DEMO_REPO, defaultBranch: DEMO_BRANCH },
-  });
+  // Idempotent: drop the demo account's baselines + branch graph, then rebuild. The demo account
+  // only holds demo data, so clearing by (account, branch) is safe across the per-service repos.
+  await prisma.serviceBaseline.deleteMany({ where: { accountId, defaultBranch: DEMO_BRANCH } });
   await prisma.graph.deleteMany({ where: { accountId, branch: DEMO_BRANCH } });
 
   const services: ParsedService[] = [];
   for (const svc of DEMO_FLEET) {
+    const repository = repoFor(svc.serviceId);
+    // Stamp the per-service repository onto the stored body too, exactly as the extractor would POST it.
+    const body: ServiceBody = { ...svc.body, repository };
     await prisma.serviceBaseline.create({
       data: {
         accountId,
-        repository: DEMO_REPO,
+        repository,
         serviceId: svc.serviceId,
         serviceName: svc.serviceName,
         language: svc.language,
         defaultBranch: DEMO_BRANCH,
         sha: 'seed0000',
-        body: Buffer.from(JSON.stringify(svc.body)),
+        body: Buffer.from(JSON.stringify(body)),
       },
     });
     services.push({
       serviceId: svc.serviceId,
       serviceName: svc.serviceName,
       language: svc.language,
-      repo: DEMO_REPO,
-      body: svc.body,
+      repo: repository,
+      body,
     });
   }
 
   const { graph, contracts } = projectReadModel(services);
 
   const graphErrors = validateGraph({
-    repo: DEMO_REPO,
+    repo: null,
     branch: DEMO_BRANCH,
     scannedAt: null,
     ...graph,
@@ -340,7 +411,7 @@ async function main(): Promise<void> {
   console.log(`Extractor API key (Bearer): ${DEMO_API_KEY}`);
   // eslint-disable-next-line no-console
   console.log(
-    `Seeded demo graph: ${DEMO_FLEET.length} services in ${DEMO_REPO} on ${DEMO_BRANCH}.`,
+    `Seeded demo graph: ${DEMO_FLEET.length} services under ${DEMO_SYSTEM} on ${DEMO_BRANCH}.`,
   );
 }
 

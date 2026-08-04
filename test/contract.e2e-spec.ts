@@ -11,10 +11,15 @@ import { createTestApp, login } from './e2e-utils';
 describe('P0 API contract', () => {
   let app: INestApplication;
   let token: string;
-  const REPO = 'acme/shop-platform';
+  // The catalog is repo-centric: a repo == a service's own repository slug. `payment-service` has
+  // both an endpoint and a produced topic, so it exercises both contract branches under a filter.
+  const REPO = 'payment-service';
 
   const authed = (path: string) =>
     request(app.getHttpServer()).get(path).set('Authorization', `Bearer ${token}`);
+
+  const authedPost = (path: string) =>
+    request(app.getHttpServer()).post(path).set('Authorization', `Bearer ${token}`);
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -31,10 +36,25 @@ describe('P0 API contract', () => {
     expect(res.body).toMatchObject({ repo: REPO, branch: 'main' });
     expect(typeof res.body.scannedAt).toBe('string');
     expect(res.body).not.toHaveProperty('meta');
+    // org is now first-class on the envelope; the demo fleet is one org.
+    expect(res.body.org).toBe('acme');
     for (const node of res.body.nodes) {
       expect(node).not.toHaveProperty('deg');
       expect(node).not.toHaveProperty('inDeg');
     }
+    // Every service node carries explicit repo + host (BACKEND-HANDOFF.md §3).
+    for (const node of res.body.nodes.filter((n: { type: string }) => n.type === 'service')) {
+      expect(typeof node.repo).toBe('string');
+      expect(typeof node.host).toBe('string');
+    }
+    expect(validateGraph(res.body)).toEqual([]);
+  });
+
+  it('GET /graph (unscoped) — whole account, org present', async () => {
+    const res = await authed('/api/v1/graph').expect(200);
+    expect(res.body.repo).toBeNull();
+    expect(res.body.org).toBe('acme');
+    expect(res.body.nodes.length).toBeGreaterThan(0);
     expect(validateGraph(res.body)).toEqual([]);
   });
 
@@ -67,6 +87,44 @@ describe('P0 API contract', () => {
     const times = res.body.map((c: { when: string }) => new Date(c.when).getTime());
     expect(times).toEqual([...times].sort((a, b) => b - a));
     expect(validateCommits(res.body)).toEqual([]);
+  });
+
+  it('GET /models — non-empty list of {id,label,vendor}', async () => {
+    const res = await authed('/api/v1/models').expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThan(0);
+    for (const m of res.body) {
+      expect(typeof m.id).toBe('string');
+      expect(typeof m.label).toBe('string');
+      expect(typeof m.vendor).toBe('string');
+    }
+    expect(res.body.some((m: { id: string }) => m.id === 'claude')).toBe(true);
+  });
+
+  it('POST /ask — grounded, returns cites, never invents', async () => {
+    const res = await authedPost('/api/v1/ask')
+      .send({ question: 'what calls payment-service?', model: 'claude' })
+      .expect(201);
+
+    expect(typeof res.body.text).toBe('string');
+    expect(res.body.text.length).toBeGreaterThan(0);
+    expect(Array.isArray(res.body.cites)).toBe(true);
+    // CheckoutOrchestrator and OrderService both call PaymentService in the demo fleet.
+    expect(res.body.cites.length).toBeGreaterThanOrEqual(2);
+    expect(res.body).toHaveProperty('note');
+    expect(res.body.model).toBe('claude-sonnet-4-5');
+  });
+
+  it('POST /ask — ungroundable question answers factually with no cites (never invents)', async () => {
+    const res = await authedPost('/api/v1/ask')
+      .send({ question: 'what is the weather today?' })
+      .expect(201);
+    expect(res.body.cites).toEqual([]);
+    expect(typeof res.body.text).toBe('string');
+  });
+
+  it('POST /ask — empty question rejected (validation)', async () => {
+    await authedPost('/api/v1/ask').send({ question: '' }).expect(400);
   });
 
   it('rejects an unknown query param (strict validation)', async () => {

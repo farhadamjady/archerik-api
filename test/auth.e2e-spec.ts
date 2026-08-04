@@ -65,7 +65,10 @@ describe('P1 auth', () => {
     const auth = `Bearer ${token}`;
 
     await request(app.getHttpServer()).get('/api/v1/me').set('Authorization', auth).expect(200);
-    await request(app.getHttpServer()).post('/api/v1/auth/logout').set('Authorization', auth).expect(201);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Authorization', auth)
+      .expect(201);
     // Same token no longer works — server-side revocation, not just a client-side discard.
     await request(app.getHttpServer()).get('/api/v1/me').set('Authorization', auth).expect(401);
   });

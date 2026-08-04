@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { GraphLookupService } from '../common/graph-lookup.service';
+import { Prisma } from '@prisma/client';
 import { filterGraph, StoredGraphData } from '../common/graph-filter';
 import { Protocol } from '../common/enums';
 import { ContractsResponse, EndpointContractDto, TopicContractDto } from '../common/types';
@@ -15,20 +15,40 @@ export interface ContractsQuery {
 
 @Injectable()
 export class ContractsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly lookup: GraphLookupService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getContracts(
     accountId: string,
     branch: string,
     query: ContractsQuery,
   ): Promise<ContractsResponse> {
-    const graph = await this.lookup.findGraph(accountId, branch, query.at);
+    // Find the graph and read ITS contracts as one consistent snapshot. An ingest reprojection
+    // replaces a branch's graph by delete-then-create, which cascade-deletes the old graph's
+    // Contract rows; without a snapshot, a reproject landing between these two reads would leave us
+    // querying a graph id whose contracts were just deleted → an empty (wrong) result. RepeatableRead
+    // pins both reads to the same instant, so we return a graph and contracts that agree.
+    const snap = await this.prisma.$transaction(
+      async (tx) => {
+        const graph = await tx.graph.findFirst({
+          where: { accountId, branch, ...(query.at ? { commitSha: query.at } : {}) },
+          orderBy: { scannedAt: 'desc' },
+        });
+        if (!graph) return null;
+        const rows = await tx.contract.findMany({
+          where: {
+            graphId: graph.id,
+            // 'rest' → endpoints, 'kafka' → topics. Contract.kind mirrors the protocol.
+            ...(query.protocol ? { kind: query.protocol } : {}),
+          },
+        });
+        return { graph, rows };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
     // Fresh account (no scans yet) → empty contracts with a 200, mirroring /graph.
-    if (!graph) return { endpoints: [], topics: [] };
+    if (!snap) return { endpoints: [], topics: [] };
+    const { graph, rows } = snap;
 
     // Resolve which services are in focus (repo/service filter), so contracts match the graph view.
     const stored = graph.data as unknown as StoredGraphData;
@@ -37,14 +57,6 @@ export class ContractsService {
       service: query.service,
     });
     const focused = Boolean(query.repo || query.service);
-
-    const rows = await this.prisma.contract.findMany({
-      where: {
-        graphId: graph.id,
-        // 'rest' → endpoints, 'kafka' → topics. Contract.kind mirrors the protocol.
-        ...(query.protocol ? { kind: query.protocol } : {}),
-      },
-    });
 
     const endpoints: EndpointContractDto[] = [];
     const topics: TopicContractDto[] = [];

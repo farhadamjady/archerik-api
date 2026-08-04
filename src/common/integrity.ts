@@ -7,7 +7,7 @@
  * trips its strict validation.
  */
 
-import { CHANGE_KIND, CHANGE_OP, CONFIDENCE, EDGE_METHOD, NODE_TYPE, PROTOCOL } from './enums';
+import { CHANGE_KIND, CHANGE_OP, CONFIDENCE, NODE_TYPE, PROTOCOL } from './enums';
 import { CommitDto, ContractsResponse, GraphResponse } from './types';
 
 const has = <T>(set: readonly T[], value: unknown): boolean => set.includes(value as T);
@@ -22,8 +22,10 @@ export function validateGraph(graph: GraphResponse): string[] {
     if (!node.team) errors.push(`node ${node.id}: missing team`);
     else if (!teamIds.has(node.team))
       errors.push(`node ${node.id}: team "${node.team}" not in teams[]`);
-    if (node.type === 'unknown' && !node.note) {
-      errors.push(`node ${node.id}: unknown node must carry a note`);
+    // unknown + deployment nodes must explain themselves (why unresolved / which identity fact
+    // named this host) — the "never hide uncertainty" invariant, enforced the same for both.
+    if ((node.type === 'unknown' || node.type === 'deployment') && !node.note) {
+      errors.push(`node ${node.id}: ${node.type} node must carry a note`);
     }
   }
 
@@ -33,7 +35,7 @@ export function validateGraph(graph: GraphResponse): string[] {
     if (!nodeIds.has(edge.to)) errors.push(`edge ${edge.id}: to "${edge.to}" is not a node id`);
     if (!has(PROTOCOL, edge.protocol))
       errors.push(`edge ${edge.id}: bad protocol "${edge.protocol}"`);
-    if (!has(EDGE_METHOD, edge.method)) errors.push(`edge ${edge.id}: bad method "${edge.method}"`);
+    // `method` is intentionally NOT validated — it's a free display string the UI never checks.
     if (!has(CONFIDENCE, edge.confidence)) {
       errors.push(`edge ${edge.id}: bad confidence "${edge.confidence}"`);
     }
@@ -48,7 +50,7 @@ export function validateContracts(contracts: ContractsResponse): string[] {
   for (const ep of contracts.endpoints) {
     if (ep.kind !== 'rest') errors.push(`endpoint ${ep.id}: kind must be "rest"`);
     if (!has(CONFIDENCE, ep.confidence)) errors.push(`endpoint ${ep.id}: bad confidence`);
-    if (!has(EDGE_METHOD, ep.method)) errors.push(`endpoint ${ep.id}: bad method`);
+    // `method` intentionally not validated (free display string, see validateGraph).
     if (typeof ep.unresolved !== 'boolean')
       errors.push(`endpoint ${ep.id}: unresolved must be boolean`);
   }

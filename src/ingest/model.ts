@@ -2,29 +2,51 @@
 // `internal/model` package; these are the fields we read/diff. Extra fields are preserved (we store
 // raw bytes) but not typed here.
 
-/** A schema field in a request/response/message DTO. Depth-2 walk; deeper => truncated:true. */
-export interface SchemaField {
-  name: string;
+/**
+ * One node of a request/response/message schema (BACKEND_CONTRACT.md §4a). The SAME recursive shape
+ * appears at the root (endpoint request/response, kafka schema) and at every nested field — a root
+ * has no `name`, a field does. The extractor emits only non-empty keys (`required` excepted — always
+ * present); we store what arrives VERBATIM and never synthesize structure (see
+ * NESTED-ENTITIES-BACKEND-CONTEXT.md: "missing/uncertain is a real signal, not a bug to paper over").
+ */
+export interface Schema {
+  /** Wire name (post-@JsonProperty / json-tag rename). Absent on a root schema. */
+  name?: string;
+  /** JSON primitive (`string|integer|number|boolean|object|array|map|void`) OR a DTO type NAME. */
   type: string;
-  /** Tri-state, always emitted. Distinct from `nullable`. */
-  required?: 'required' | 'optional' | 'unknown';
+  /** May the VALUE be null. Orthogonal to `required`; omitted when false. */
   nullable?: boolean;
+  /** Tri-state, always emitted by the extractor. Distinct from `nullable`. */
+  required?: 'required' | 'optional' | 'unknown';
+  /** Arrays only — element type name (array-of-object also HOISTS the element's fields into `nested`). */
   items?: string;
+  /** Maps only — the key/value type names (values are named, not expanded). */
+  key_type?: string;
+  value_type?: string;
+  /** Child fields (object) or hoisted element fields (array-of-object). */
+  nested?: Schema[];
+  /** Walk stopped here (depth limit or cycle): `{type:"<TypeName>",truncated:true}`, no `nested`. */
   truncated?: boolean;
-  nested?: SchemaField[];
+  /** Enum members in DECLARATION order — never re-sort (omitted when absent). */
+  enum?: string[];
+  /** Bean-Validation metadata, open string→string map, e.g. `{maxLength:"10"}` (omitted when empty). */
+  constraints?: Record<string, string>;
+  /** PER-NODE detection certainty (`confirmed|likely|uncertain`) — degrades gracefully by design. */
+  confidence?: string;
 }
 
-export interface SchemaType {
-  type: string;
-  required?: string;
-  nested?: SchemaField[];
-}
+/**
+ * Historical aliases — request/response/message schemas and their fields are one recursive `Schema`
+ * now (§4a). Kept so call sites still read as "a field" vs. "a root type".
+ */
+export type SchemaField = Schema;
+export type SchemaType = Schema;
 
 export interface Endpoint {
   method: string;
   path: string;
-  request?: SchemaType;
-  response?: SchemaType;
+  request?: Schema;
+  response?: Schema;
   protocol: string;
   detection: string;
   confidence: string;
@@ -44,7 +66,7 @@ export interface OutboundDependency {
 export interface KafkaEdge {
   topic: string;
   resolved?: boolean;
-  schema?: SchemaType;
+  schema?: Schema;
   protocol: string;
   detection: string;
   confidence: string;
@@ -82,12 +104,25 @@ export const EMPTY_SERVICE: ServiceBody = {
 
 // --- Diff shapes (BACKEND_CONTRACT.md §5) ---
 
+/**
+ * One field-level schema change (BACKEND_CONTRACT.md §5/§4a). A node is identified by its
+ * **wire-name path** from the edge root (`customer.address`, `lines[].sku`; `""` = the root itself).
+ * - path present on one side only → `add` / `remove` (with the node's `type`).
+ * - same path, different type facet (`type`/`items`/`key_type`/`value_type`) → `change` with `from`→`to`.
+ * - same path, same type, differing attribute (nullable/required/enum/constraints/confidence/truncated)
+ *   → `change` with `attrs` naming what differs.
+ */
 export interface SchemaFieldDiff {
   op: 'add' | 'remove' | 'change';
-  name: string;
+  /** Wire-name path from the edge root; `""` denotes the root schema node. */
+  path: string;
+  /** Node type facet at that path (for add/remove, and context on a type change). */
   type?: string;
+  /** Old → new type facet, on a type change. */
   from?: string;
   to?: string;
+  /** Attribute names that differ, on an attribute-only change. */
+  attrs?: string[];
 }
 
 /** A `changed` entry: the head object plus what differs and (for schema changes) field-level diff. */

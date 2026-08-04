@@ -19,7 +19,15 @@ export class GraphService {
 
     // Fresh account (no scans yet) → empty graph with a 200, so the UI can show an empty state.
     if (!graph) {
-      return { repo: query.repo ?? null, branch, scannedAt: null, teams: [], nodes: [], edges: [] };
+      return {
+        org: null,
+        repo: query.repo ?? null,
+        branch,
+        scannedAt: null,
+        teams: [],
+        nodes: [],
+        edges: [],
+      };
     }
 
     const stored = graph.data as unknown as StoredGraphData;
@@ -29,6 +37,7 @@ export class GraphService {
 
     // Flat envelope per API-CONTRACT.md — no `meta`, no deg/inDeg/outDeg (UI computes those).
     return {
+      org: data.org ?? null,
       repo: query.repo ?? null,
       branch: graph.branch,
       scannedAt: graph.scannedAt.toISOString(),

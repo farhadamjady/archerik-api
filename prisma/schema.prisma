@@ -228,6 +228,17 @@ model SsoAuthRequest {
   @@map("sso_auth_requests")
 }
 
+/// One deploy-identity fact: a (service_name, namespace) and the set of DNS `hosts` it answers on,
+/// as read from a deployment/GitOps repo (helm/kustomize/k8s-raw) or self-declared alongside a scan
+/// (.ekg-identity.json). This is the host->service mapping the extractor CAN'T prove from a service
+/// repo alone (dir name / logical name / DNS host diverge), submitted via POST /v1/ingest/identity-map.
+///
+/// Storage is a deliberately FLAT list: the same (service_name, namespace) legitimately recurs across
+/// `environment`s (different hosts per env — both kept) and can arrive from more than one `source`
+/// over time. There is intentionally NO unique constraint — arbitration (confirmed > likely) is a
+/// read/projection concern, never a storage-time drop. Rows are entry-time and replaced WHOLESALE per
+/// (account, repository) on each submit (diff new-vs-old, then delete+recreate), mirroring the
+/// per-service baseline model. `confidence` is confirmed|likely only (never uncertain here).
 /// One row per /v1/ingest call — the account's scan history / metering log. Written on every
 /// ingest (success, unchanged, or rejected) so usage is auditable per account over time. This is
 /// distinct from the account-wide Graph read model, which is overwritten in place with no history.
