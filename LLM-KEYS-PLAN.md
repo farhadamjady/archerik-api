@@ -38,10 +38,14 @@ previous one is committed.
       migration; `LLM_ENCRYPTION_KEY` in `.env.example`.
       *Green:* migration applies, SSO e2e still passes, golden-vector test proves old ciphertext
       still decrypts.
-- [ ] **2 — settings endpoints.** `src/settings/` module: `GET`/`PUT`/`DELETE /settings/llm-keys`.
+- [x] **2 — settings endpoints.** `src/settings/` module: `GET`/`PUT`/`DELETE /settings/llm-keys`,
+      plus `src/llm/providers.ts` (the shared provider vocabulary steps 3-6 build on).
       No key verification yet (that lands in step 4).
-      *Green:* `test/llm-keys.e2e-spec.ts` — raw key never returned, `422` unknown provider,
-      `400` empty key, `DELETE` idempotent `204`.
+      *Green:* `test/llm-keys.e2e-spec.ts`, 12 tests.
+      Note: semantic validation (422/400) is in the service, not the DTO, so every rejection
+      carries the `{ error }` body the UI renders verbatim — class-validator's default shape has
+      no `error` string. Only structurally malformed bodies (non-string fields) fall through to
+      Nest's default shape.
 - [ ] **3 — model registry.** `src/llm/model-registry.ts`; `provider` on `GET /models`; drop `llama`.
       *Green:* build + a registry assertion in the contract e2e.
 - [ ] **4 — providers.** `provider.types.ts`, `anthropic.provider.ts`, `openai.provider.ts`,

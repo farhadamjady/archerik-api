@@ -9,6 +9,7 @@ import { HealthController } from './health/health.controller';
 import { IngestModule } from './ingest/ingest.module';
 import { ModelsModule } from './models/models.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CommitsModule,
     IngestModule,
     ModelsModule,
+    SettingsModule,
     AskModule,
   ],
   controllers: [HealthController],
