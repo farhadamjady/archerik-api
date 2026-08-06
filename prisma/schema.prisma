@@ -117,6 +117,7 @@ model Account {
   graphs        Graph[]
   scans         Scan[]
   ssoConnection SsoConnection?
+  llmKeys       LlmProviderKey[]
 
   @@map("accounts")
 }
@@ -135,6 +136,37 @@ model ApiKey {
 
   @@index([accountId])
   @@map("api_keys")
+}
+
+/// A customer-supplied LLM provider key (bring-your-own-key for the Ask tab), one per
+/// (account, provider). Account-scoped, not per-user: every member of an account shares one set of
+/// provider keys.
+///
+/// `keyEnc` is *encrypted*, not hashed like ApiKey.keyHash/Session.tokenHash — same rationale as
+/// SsoConnection.clientSecretEnc: the key is presented BACK to Anthropic/OpenAI on every Ask call,
+/// so it must be reversible. AES-256-GCM via src/common/secret-box.ts, keyed by LLM_ENCRYPTION_KEY
+/// (deliberately a different var from SSO_ENCRYPTION_KEY, so one leaked key doesn't unlock both).
+///
+/// `last4` is stored in the clear on purpose. GET /settings/llm-keys is the endpoint the UI polls,
+/// and it only needs "configured + last four characters" — keeping those denormalised means that
+/// read path never loads the encryption key or holds a plaintext key in memory. The raw key is
+/// never returned by any endpoint.
+model LlmProviderKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  /// Lowercase provider enum: 'anthropic' | 'openai'. Validated at the DTO; an unknown provider is
+  /// rejected with 422 and never stored.
+  provider  String
+  keyEnc    Bytes    @map("key_enc")
+  last4     String   @map("last4") @db.VarChar(4)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, provider])
+  @@index([accountId])
+  @@map("llm_provider_keys")
 }
 
 /// The stored per-service baseline for diffing. `body` holds the extractor's byte-stable Service
