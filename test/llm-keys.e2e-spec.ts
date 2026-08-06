@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { LlmClientFactory } from '../src/llm/llm-client.factory';
+import { LlmProvider, LlmProviderError } from '../src/llm/provider.types';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, login } from './e2e-utils';
 
@@ -25,6 +27,9 @@ describe('Settings → LLM provider keys', () => {
     request(app.getHttpServer()).get('/api/v1/settings/llm-keys').set('Authorization', `Bearer ${token}`);
 
   beforeAll(async () => {
+    // These tests use fake keys and must not reach the network. The verification path itself is
+    // covered separately below, against a stubbed provider.
+    process.env.LLM_VERIFY_KEYS = 'false';
     app = await createTestApp();
     prisma = app.get(PrismaService);
     token = await login(app);
@@ -35,6 +40,7 @@ describe('Settings → LLM provider keys', () => {
   afterAll(async () => {
     await prisma.llmProviderKey.deleteMany({});
     await app.close();
+    delete process.env.LLM_VERIFY_KEYS;
   });
 
   it('requires authentication', async () => {
@@ -169,5 +175,89 @@ describe('Settings → LLM provider keys', () => {
   it('DELETE — removes only the named provider', async () => {
     const openai = await prisma.llmProviderKey.findFirst({ where: { provider: 'openai' } });
     expect(openai).not.toBeNull();
+  });
+});
+
+/**
+ * Key verification at save time (BACKEND-LLM-KEYS.md §2). Runs against a stubbed LlmClientFactory,
+ * so it exercises the real service logic with no network access and no real provider key.
+ */
+describe('Settings → LLM key verification', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  let token: string;
+  /** Swapped per test to drive verifyKey down each branch. */
+  let verify: () => Promise<void>;
+
+  const put = (body: Record<string, unknown>) =>
+    request(app.getHttpServer())
+      .put('/api/v1/settings/llm-keys')
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+
+  beforeAll(async () => {
+    delete process.env.LLM_VERIFY_KEYS; // verification ON — that's the point of this block
+    const stub: Pick<LlmClientFactory, 'create'> = {
+      create: (): LlmProvider =>
+        ({
+          id: 'anthropic',
+          verifyKey: () => verify(),
+          complete: () => Promise.reject(new Error('not used in this suite')),
+        }) as LlmProvider,
+    };
+    app = await createTestApp((builder) =>
+      builder.overrideProvider(LlmClientFactory).useValue(stub),
+    );
+    prisma = app.get(PrismaService);
+    token = await login(app);
+    await prisma.llmProviderKey.deleteMany({});
+  });
+
+  afterAll(async () => {
+    await prisma.llmProviderKey.deleteMany({});
+    await app.close();
+  });
+
+  it('stores the key when the provider accepts it', async () => {
+    verify = () => Promise.resolve();
+    const res = await put({ provider: 'anthropic', apiKey: ANTHROPIC_KEY }).expect(200);
+    expect(res.body.last4).toBe('a1b2');
+    expect(await prisma.llmProviderKey.count({ where: { provider: 'anthropic' } })).toBe(1);
+  });
+
+  it('400s with a user-facing message when the provider rejects the key, and stores nothing', async () => {
+    await prisma.llmProviderKey.deleteMany({});
+    verify = () =>
+      Promise.reject(new LlmProviderError('rejected', 'anthropic', 'the stored key was rejected'));
+
+    const res = await put({ provider: 'anthropic', apiKey: 'sk-ant-bogus' }).expect(400);
+
+    expect(res.body.error).toBe('Anthropic rejected this key. Check it and try again.');
+    // A rejected key must never land in the store.
+    expect(await prisma.llmProviderKey.count({ where: { provider: 'anthropic' } })).toBe(0);
+  });
+
+  it('503s and stores nothing when the provider is unreachable', async () => {
+    await prisma.llmProviderKey.deleteMany({});
+    verify = () =>
+      Promise.reject(new LlmProviderError('timeout', 'anthropic', 'the request timed out'));
+
+    const res = await put({ provider: 'anthropic', apiKey: ANTHROPIC_KEY }).expect(503);
+
+    expect(typeof res.body.error).toBe('string');
+    // Fails closed: an unverifiable key isn't stored, so the failure surfaces here rather than
+    // later at Ask time where the user has no context for it.
+    expect(await prisma.llmProviderKey.count({ where: { provider: 'anthropic' } })).toBe(0);
+  });
+
+  it('rejects an unknown provider before ever calling the provider', async () => {
+    verify = () => Promise.reject(new Error('must not be called'));
+    const res = await put({ provider: 'gemini', apiKey: 'sk-whatever' }).expect(422);
+    expect(res.body).toEqual({ error: 'unknown provider' });
+  });
+
+  it('rejects an empty key before ever calling the provider', async () => {
+    verify = () => Promise.reject(new Error('must not be called'));
+    await put({ provider: 'anthropic', apiKey: '   ' }).expect(400);
   });
 });

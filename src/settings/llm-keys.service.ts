@@ -1,6 +1,15 @@
-import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { encryptSecret } from '../common/secret-box';
-import { isLlmProvider, LLM_PROVIDERS, LlmProviderId } from '../llm/providers';
+import { LlmClientFactory } from '../llm/llm-client.factory';
+import { describeForLog } from '../llm/llm-errors';
+import { LlmProviderError } from '../llm/provider.types';
+import { isLlmProvider, LLM_PROVIDERS, LlmProviderId, PROVIDER_LABELS } from '../llm/providers';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Env var holding the 32-byte base64 key that encrypts provider keys at rest. */
@@ -32,7 +41,12 @@ const MAX_KEY_LENGTH = 500;
  */
 @Injectable()
 export class LlmKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(LlmKeysService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clients: LlmClientFactory,
+  ) {}
 
   /** Status for every known provider — configured or not. Never decrypts. */
   async list(accountId: string): Promise<LlmKeyStatus[]> {
@@ -75,6 +89,8 @@ export class LlmKeysService {
       });
     }
 
+    await this.verify(provider, key);
+
     const keyEnc = encryptSecret(key, LLM_KEY_ENV_VAR);
     const last4 = key.slice(-4);
 
@@ -94,5 +110,36 @@ export class LlmKeysService {
    */
   async remove(accountId: string, provider: string): Promise<void> {
     await this.prisma.llmProviderKey.deleteMany({ where: { accountId, provider } });
+  }
+
+  /**
+   * Checks the key against the provider before storing it (BACKEND-LLM-KEYS.md §2, "optional but
+   * preferred"). Uses an auth-only endpoint, so verification costs no tokens.
+   *
+   * Fails closed on every error, including transient ones. Storing a key we couldn't verify just
+   * moves the failure to Ask time, where it surfaces as a confusing upstream error long after the
+   * user left Settings — a typo is far cheaper to report here, next to the input that caused it.
+   *
+   * Set LLM_VERIFY_KEYS=false for offline development and CI, where there is no egress.
+   */
+  private async verify(provider: LlmProviderId, apiKey: string): Promise<void> {
+    if (process.env.LLM_VERIFY_KEYS === 'false') return;
+
+    const label = PROVIDER_LABELS[provider];
+    try {
+      await this.clients.create(provider, apiKey).verifyKey();
+    } catch (err) {
+      // Logged without the key or the upstream body — both can carry secrets.
+      this.logger.warn(`${provider} key verification failed: ${describeForLog(err)}`);
+
+      if (err instanceof LlmProviderError && err.kind === 'rejected') {
+        throw new BadRequestException({
+          error: `${label} rejected this key. Check it and try again.`,
+        });
+      }
+      throw new ServiceUnavailableException({
+        error: `Couldn't reach ${label} to verify this key — try again in a moment.`,
+      });
+    }
   }
 }

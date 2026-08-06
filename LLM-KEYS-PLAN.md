@@ -52,10 +52,17 @@ previous one is committed.
       registry-internal and must never appear in the `GET /models` payload.
       *Green:* contract e2e asserts provider on every model, no `llama`, no `wireModel` leak, and
       `model: 'claude-opus-5'` on the ask test that doesn't depend on seeded data.
-- [ ] **4 — providers.** `provider.types.ts`, `anthropic.provider.ts`, `openai.provider.ts`,
-      `llm-errors.ts`, `llm.module.ts`. Wire `verifyKey()` into step 2's `PUT`.
-      Deps: `@anthropic-ai/sdk`, `openai`. *May split if it runs long — update this file first.*
-      *Green:* bad key rejected inline at save time.
+- [x] **4 — providers.** `provider.types.ts`, `anthropic.provider.ts`, `openai.provider.ts`,
+      `llm-errors.ts`, `llm-client.factory.ts`, `llm.module.ts`. `verifyKey()` wired into `PUT`.
+      Deps: `@anthropic-ai/sdk@0.115`, `openai@7.4`. Env: `LLM_VERIFY_KEYS`,
+      `LLM_REQUEST_TIMEOUT_MS`.
+      *Green:* 17 key tests + 12 provider wire-shape tests.
+      **Not yet verified against a live provider** — no credentials on this machine. The request
+      shapes are pinned by `test/llm-providers.e2e-spec.ts` (both SDKs pointed at a local server via
+      their base-URL env var), but the first real call happens in step 6. If it 400s, look there
+      first.
+      Verification fails closed: a key that can't be checked isn't stored, so the error surfaces in
+      Settings rather than later at Ask time. `LLM_VERIFY_KEYS=false` for offline dev/CI.
 - [ ] **5 — catalog tools + evidence ledger.** `src/ask/catalog-tools.ts`. Pure functions, no
       network, no SDK.
       *Green:* unit test incl. the fabricated-evidence-id-gets-dropped case.

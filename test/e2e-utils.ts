@@ -1,6 +1,6 @@
 import { INestApplication, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 
@@ -9,9 +9,17 @@ export const DEMO_CREDENTIALS = { email: 'demo@acme.com', password: 'demo1234' }
 /** Extractor API key created by prisma/seed.ts. */
 export const DEMO_API_KEY = 'ekg_dev_local_demokey';
 
-/** Boots the app exactly as main.ts does (rawBody + prefix exclusion + strict ValidationPipe). */
-export async function createTestApp(): Promise<NestExpressApplication> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+/**
+ * Boots the app exactly as main.ts does (rawBody + prefix exclusion + strict ValidationPipe).
+ *
+ * `customize` hooks the testing-module builder before compile, so a suite can swap a provider for a
+ * stub — e.g. overriding LlmClientFactory to exercise provider failure paths without network access.
+ */
+export async function createTestApp(
+  customize?: (builder: TestingModuleBuilder) => TestingModuleBuilder,
+): Promise<NestExpressApplication> {
+  const base = Test.createTestingModule({ imports: [AppModule] });
+  const moduleRef = await (customize ? customize(base) : base).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
   app.setGlobalPrefix('api/v1', {
     exclude: [
