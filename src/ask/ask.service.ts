@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { resolveModel } from '../llm/model-registry';
 import { StoredGraphData } from '../common/graph-filter';
 import { GraphLookupService } from '../common/graph-lookup.service';
 import { EdgeDto, NodeDto, TopicContractDto } from '../common/types';
@@ -18,14 +19,14 @@ export interface AskResponse {
   model: string;
 }
 
-// Selected model id → the label echoed into the "grounded in catalog · <model>" header. Mirrors the
-// executable reference (dev-server.mjs). The answer engine itself is deterministic; the model is
-// cosmetic, so an unknown id falls back to the Claude label.
-const MODEL_LABELS: Record<string, string> = {
-  claude: 'claude-sonnet-4-5',
-  gpt: 'gpt-4o',
-  llama: 'llama-3.1-70b',
-};
+// The model string echoed into the "grounded in catalog · <model>" header comes from the shared
+// registry (src/llm/model-registry.ts), so the id the user picked, the provider key that will be
+// loaded, and the model sent upstream can't drift apart. An unknown id falls back to the default
+// rather than 400ing — a stale id from a cached UI bundle should still get an answer.
+//
+// NOTE: the answer engine below is still the deterministic resolver. It is replaced by a real
+// provider call in step 6 of LLM-KEYS-PLAN.md; the registry lookup lands early so /models and /ask
+// agree on the model vocabulary from here on.
 
 /**
  * POST /api/v1/ask — grounded Q&A over the account catalog.
@@ -49,7 +50,7 @@ export class AskService {
     question: string,
     model?: string,
   ): Promise<AskResponse> {
-    const modelLabel = MODEL_LABELS[(model ?? '').toLowerCase()] ?? MODEL_LABELS.claude;
+    const modelLabel = resolveModel(model).wireModel;
 
     const graph = await this.lookup.findGraph(accountId, branch);
     if (!graph) {

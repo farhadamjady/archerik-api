@@ -46,8 +46,12 @@ previous one is committed.
       carries the `{ error }` body the UI renders verbatim — class-validator's default shape has
       no `error` string. Only structurally malformed bodies (non-string fields) fall through to
       Nest's default shape.
-- [ ] **3 — model registry.** `src/llm/model-registry.ts`; `provider` on `GET /models`; drop `llama`.
-      *Green:* build + a registry assertion in the contract e2e.
+- [x] **3 — model registry.** `src/llm/model-registry.ts`; `provider` on `GET /models`; drop `llama`.
+      `AskService` now takes its model string from the registry too, so /models and /ask share one
+      vocabulary. Wire model ids: `claude` → `claude-opus-5`, `gpt` → `gpt-4o`. `wireModel` is
+      registry-internal and must never appear in the `GET /models` payload.
+      *Green:* contract e2e asserts provider on every model, no `llama`, no `wireModel` leak, and
+      `model: 'claude-opus-5'` on the ask test that doesn't depend on seeded data.
 - [ ] **4 — providers.** `provider.types.ts`, `anthropic.provider.ts`, `openai.provider.ts`,
       `llm-errors.ts`, `llm.module.ts`. Wire `verifyKey()` into step 2's `PUT`.
       Deps: `@anthropic-ai/sdk`, `openai`. *May split if it runs long — update this file first.*

@@ -89,7 +89,7 @@ describe('P0 API contract', () => {
     expect(validateCommits(res.body)).toEqual([]);
   });
 
-  it('GET /models — non-empty list of {id,label,vendor}', async () => {
+  it('GET /models — non-empty list of {id,label,vendor,provider}', async () => {
     const res = await authed('/api/v1/models').expect(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
@@ -97,8 +97,15 @@ describe('P0 API contract', () => {
       expect(typeof m.id).toBe('string');
       expect(typeof m.label).toBe('string');
       expect(typeof m.vendor).toBe('string');
+      // §5: the UI cross-references this against GET /settings/llm-keys to flag "needs key".
+      expect(['anthropic', 'openai']).toContain(m.provider);
+      // The provider's own model string stays server-side.
+      expect(m).not.toHaveProperty('wireModel');
     }
     expect(res.body.some((m: { id: string }) => m.id === 'claude')).toBe(true);
+    // `llama` was dropped: a model with no provider reads as always-available to the UI, and there
+    // is no self-hosted inference endpoint to answer with.
+    expect(res.body.some((m: { id: string }) => m.id === 'llama')).toBe(false);
   });
 
   it('POST /ask — grounded, returns cites, never invents', async () => {
@@ -112,7 +119,8 @@ describe('P0 API contract', () => {
     // CheckoutOrchestrator and OrderService both call PaymentService in the demo fleet.
     expect(res.body.cites.length).toBeGreaterThanOrEqual(2);
     expect(res.body).toHaveProperty('note');
-    expect(res.body.model).toBe('claude-sonnet-4-5');
+    // Sourced from the shared model registry, so /models and /ask can't drift apart.
+    expect(res.body.model).toBe('claude-opus-5');
   });
 
   it('POST /ask — ungroundable question answers factually with no cites (never invents)', async () => {
@@ -121,6 +129,9 @@ describe('P0 API contract', () => {
       .expect(201);
     expect(res.body.cites).toEqual([]);
     expect(typeof res.body.text).toBe('string');
+    // Model resolution doesn't depend on seeded graph data, so it's pinned here too: an omitted
+    // `model` falls back to the registry default rather than 400ing.
+    expect(res.body.model).toBe('claude-opus-5');
   });
 
   it('POST /ask — empty question rejected (validation)', async () => {
