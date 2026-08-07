@@ -63,9 +63,12 @@ previous one is committed.
       first.
       Verification fails closed: a key that can't be checked isn't stored, so the error surfaces in
       Settings rather than later at Ask time. `LLM_VERIFY_KEYS=false` for offline dev/CI.
-- [ ] **5 — catalog tools + evidence ledger.** `src/ask/catalog-tools.ts`. Pure functions, no
-      network, no SDK.
-      *Green:* unit test incl. the fabricated-evidence-id-gets-dropped case.
+- [x] **5 — catalog tools + evidence ledger.** `src/ask/catalog-tools.ts` + `src/ask/evidence.ts`.
+      Pure functions, no network, no SDK. *Green:* 22 tests.
+      Tools: `list_services`, `get_service_dependencies`, `list_topics`, `get_topic`,
+      `get_endpoints`. Only *relationships* are citable — a bare service/topic listing records no
+      evidence, so `cites` means "the facts this claim rests on", not "everything the model looked
+      at". Tools never throw: bad names/args come back as an `error` field the model retries from.
 - [ ] **6 — Ask rewrite.** The tool loop in `ask.service.ts`; throttler on the controller.
       *May split if it runs long — update this file first.*
       *Green:* `test/ask-llm.e2e-spec.ts` against a stub provider.
