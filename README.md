@@ -84,6 +84,35 @@ signature/iss/aud/nonce validation runs against real crypto. Run via `npm run te
 passes Node's `--experimental-vm-modules` flag — required for `openid-client`'s dynamic ESM import
 to work inside Jest's sandboxed test context (see the comment in `src/auth/sso/oidc-client.ts`).
 
+## Ask (`POST /api/v1/ask`) and LLM provider keys
+
+Ask answers questions about the catalog with an LLM, using **the account's own provider key**
+(bring-your-own-key). Keys are managed in Settings → LLM (`GET/PUT/DELETE
+/api/v1/settings/llm-keys`), stored encrypted at rest, and never returned by any endpoint — reads
+serve a denormalised `last4` so that path never decrypts. Supported providers: `anthropic`,
+`openai`. With no key configured for the chosen model's provider, `/ask` returns `409`.
+
+**Answers can't cite something that isn't there.** The model reaches the graph only through
+read-only catalog tools (`src/ask/catalog-tools.ts`) — never a raw dump. Every relationship a tool
+returns is recorded in a per-request evidence ledger with an id; the model names the ids it used;
+the backend renders `cites` from the recorded rows (`src/ask/evidence.ts`). An invented id resolves
+to nothing and is dropped, so CLAUDE.md §6's "never invents" holds structurally rather than by the
+model's cooperation. `text` comes from the model; `cites` and `note` are computed by the backend.
+A provider failure is always a `4xx`/`5xx` with an `error` string, never a fabricated answer.
+
+Providers live behind one interface (`src/llm/provider.types.ts`) modelling a single round trip;
+the tool loop stays in `AskService`. Adding a provider is one adapter plus a registry entry in
+`src/llm/model-registry.ts`, which is also the single source of truth for `GET /models`.
+
+Env vars: `LLM_ENCRYPTION_KEY` (32-byte base64, `openssl rand -base64 32` — separate from
+`SSO_ENCRYPTION_KEY` so one leaked key doesn't unlock both; no default, fails closed if unset),
+`LLM_VERIFY_KEYS` (default on — validates a key against the provider before storing it; set
+`false` for offline dev/CI, where there's no egress), `LLM_REQUEST_TIMEOUT_MS` (default 60000).
+
+No provider account needed for testing: `test/ask-llm.e2e-spec.ts` scripts a stub provider through
+the whole loop, and `test/llm-providers.e2e-spec.ts` pins each adapter's wire shape by pointing the
+real SDKs at a local server.
+
 ## Extractor control plane (`/v1`)
 
 The `service-discovery` Go CLI submits scan results here. These routes are the **ingest side** — a

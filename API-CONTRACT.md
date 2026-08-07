@@ -179,7 +179,8 @@ evidence. A failed/unreachable ask renders as an explicit "no answer" error bubb
 never a silent drop, never an ungrounded guess. A cite with an unrecognized `confidence` value is
 displayed as *uncertain*, never stronger.
 
-Request: `{ "question": "what depends on PaymentService?", "model": "claude" }`
+Request: `{ "question": "what depends on PaymentService?", "model": "claude" }` — the LLM key is
+**never** in this request; the backend uses the account's stored provider key (§7).
 
 ```jsonc
 {
@@ -188,15 +189,44 @@ Request: `{ "question": "what depends on PaymentService?", "model": "claude" }`
     { "name": "CheckoutOrchestrator", "confidence": "confirmed", "dir": "FeignClient" }
   ],
   "note": "3 of these rest on likely/uncertain edges — treat the list as indicative, not exhaustive.", // or null
-  "model": "claude-sonnet-4-5"             // echoed into the "grounded in graph · <model>" header
+  "model": "claude-opus-5"                 // echoed into the "grounded in graph · <model>" header
 }
 ```
 
+**Errors** — all carry `{ "error": "..." }`, shown verbatim in the "no answer" bubble:
+
+| Status | When |
+|---|---|
+| `409` | No key configured for the chosen model's provider — e.g. `no API key configured for anthropic`. The UI points the user at Settings → LLM. |
+| `429` | The provider rate-limited the request. |
+| `502` | The provider rejected the stored key, or declined to answer. |
+| `503` | The provider is unavailable. |
+| `504` | The provider timed out. |
+
+**How grounding is enforced.** The model reaches the graph only through read-only catalog tools;
+it is never handed a raw dump. Every relationship a tool returns is recorded in a per-request
+evidence ledger with an id, the model names the ids it used, and the backend renders `cites` from
+the recorded rows — so a citation the model invented resolves to nothing and is dropped. `text`
+comes from the model; `cites` and `note` are computed by the backend (`note` from the confidence
+mix of the cites, so it stays factual rather than a judgment). A provider failure is never turned
+into an answer.
+
 ### 5. `GET /api/v1/models`
 
-`[ { "id": "claude", "label": "Claude Sonnet 4.5" }, ... ]` — feeds the Ask model selector.
-Non-fatal for the UI: if this fails, it falls back to a built-in list. The `id` chosen by the user
-is what arrives in `POST /ask` as `model`.
+Feeds the Ask model selector. Non-fatal for the UI: if this fails, it falls back to a built-in
+list. The `id` chosen by the user is what arrives in `POST /ask` as `model`.
+
+```jsonc
+[
+  { "id": "claude", "label": "Claude Opus 5", "vendor": "Anthropic API", "provider": "anthropic" },
+  { "id": "gpt",    "label": "GPT-4o",        "vendor": "OpenAI API",    "provider": "openai" }
+]
+```
+
+`provider` (enum: `anthropic | openai`, matching §7) lets the UI cross-reference
+`GET /settings/llm-keys` and flag models whose provider has no key ("needs key"); the picker still
+shows them. A model without a `provider` would be treated as always-available — so every model the
+backend serves carries one, since none can answer without a key.
 
 ### 6. Auth (bearer token — this is what the UI implements)
 
@@ -228,6 +258,40 @@ is what arrives in `POST /ask` as `model`.
 
 Token format is the backend's choice (opaque vs JWT) — the UI never introspects it.
 
+### 7. LLM provider keys (Settings → LLM)
+
+Bring-your-own-key for the Ask tab. Keys are **server-stored, encrypted at rest, and
+account-scoped** — every member of an account shares one set, and the raw key is **never returned
+by any endpoint**. `provider` is a lowercase enum: `anthropic | openai`; anything else is rejected
+and never stored. Writes are not gated to admins (there is no role model on `User`).
+
+**`GET /api/v1/settings/llm-keys`** — one entry per provider, configured or not:
+
+```jsonc
+[
+  { "provider": "anthropic", "configured": true,  "last4": "a1b2", "updatedAt": "2026-08-06T14:02:11Z" },
+  { "provider": "openai",    "configured": false }
+]
+```
+
+`last4` / `updatedAt` appear **only** when `configured: true`. This endpoint never decrypts
+anything — `last4` is stored alongside the ciphertext for exactly this reason.
+
+**`PUT /api/v1/settings/llm-keys`** — request `{ "provider": "anthropic", "apiKey": "sk-ant-…" }`.
+
+- `200` → the same status-entry shape as above, reflecting the new key (never echoes it).
+- `400 { "error": "…" }` → empty/malformed key, **or** the provider rejected it. The key is
+  verified against the provider before storing (an auth-only call that spends no tokens), so a typo
+  is reported here rather than surfacing later as a failed Ask.
+- `422 { "error": "unknown provider" }` → not in the enum.
+- `503 { "error": "…" }` → the provider couldn't be reached to verify. Fails closed: the key is
+  **not** stored.
+
+**`DELETE /api/v1/settings/llm-keys/{provider}`** — `204`, idempotent (deleting an unconfigured or
+unknown provider is still `204`).
+
+Every non-2xx body carries an `error` string, which the UI renders verbatim on the provider card.
+
 ---
 
 ## P2 — blocked on product requirements (Settings page is a stub)
@@ -239,6 +303,8 @@ Provisional, don't build until the Settings scope is decided:
 - `GET/PUT /api/v1/settings/ownership` — team ↔ service mapping
 - `GET/PUT /api/v1/settings/pr-comments` — cartograph-bot PR-comment behaviour
 - `POST /api/v1/scan` — trigger a rescan (returns job id); `GET /api/v1/scan/{id}` for status
+
+(`GET/PUT/DELETE /api/v1/settings/llm-keys` is no longer provisional — see §7.)
 
 ---
 
