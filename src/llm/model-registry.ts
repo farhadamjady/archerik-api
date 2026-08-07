@@ -23,6 +23,12 @@ interface ModelEntry extends ModelDto {
    * model we haven't validated against the grounding prompt.
    */
   wireModel: string;
+  /**
+   * Model to retry on if the provider's safety classifiers decline the request. Always named
+   * explicitly rather than delegated to a provider-chosen default, so the substitute is a
+   * deliberate, reviewable choice. Omitted where the provider has no such mechanism.
+   */
+  fallbackModel?: string;
 }
 
 /**
@@ -41,6 +47,7 @@ const MODELS: readonly ModelEntry[] = [
     vendor: 'Anthropic API',
     provider: 'anthropic',
     wireModel: 'claude-opus-5',
+    fallbackModel: 'claude-opus-4-8',
   },
   {
     id: 'gpt',

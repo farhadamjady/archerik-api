@@ -259,7 +259,11 @@ function getTopic(input: Record<string, unknown>, ctx: ToolContext): ToolOutput 
     })),
     source: topic.source,
     confidence: topic.confidence,
-    message_fields: topic.message.map((f) => ({ name: f.name, type: f.type, nullable: f.nullable })),
+    message_fields: topic.message.map((f) => ({
+      name: f.name,
+      type: f.type,
+      nullable: f.nullable,
+    })),
     note: topic.producer
       ? 'Consumers are derived from consumers’ code, not declared by the producer.'
       : 'No producer was found in the scanned repositories, so the message shape is uncertain.',
@@ -340,7 +344,9 @@ export function labeller(catalog: Catalog): (id: string) => string {
 function findNode(catalog: Catalog, wanted: string): NodeDto | undefined {
   const lower = wanted.toLowerCase();
   const candidates = (n: NodeDto) =>
-    [n.id, n.name, n.repo, n.host].filter((v): v is string => Boolean(v)).map((v) => v.toLowerCase());
+    [n.id, n.name, n.repo, n.host]
+      .filter((v): v is string => Boolean(v))
+      .map((v) => v.toLowerCase());
 
   const exact = catalog.nodes.find((n) => candidates(n).includes(lower));
   if (exact) return exact;

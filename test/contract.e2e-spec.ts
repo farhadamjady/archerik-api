@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { validateCommits, validateContracts, validateGraph } from '../src/common/integrity';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, login } from './e2e-utils';
 
 /**
@@ -31,6 +32,7 @@ interface GraphEdge {
 
 describe('P0 API contract', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
   let token: string;
   /** A repo slug that genuinely exists in this account's graph — derived, never hardcoded. */
   let REPO: string;
@@ -47,6 +49,7 @@ describe('P0 API contract', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
+    prisma = app.get(PrismaService);
     token = await login(app);
 
     const graph = (await authed('/api/v1/graph').expect(200)).body;
@@ -166,42 +169,30 @@ describe('P0 API contract', () => {
     expect(res.body.some((m: { id: string }) => m.id === 'llama')).toBe(false);
   });
 
-  it('POST /ask — grounded, returns cites, never invents', async () => {
+  // Ask now answers via the account's own provider key, so with none configured the contract is a
+  // 409 (BACKEND-LLM-KEYS.md §4). The grounded-answer behaviour — the tool loop, the evidence
+  // ledger, error mapping — is covered in ask-llm.e2e-spec.ts against a scripted provider, since
+  // asserting it here would mean either a real API call or a stub this suite has no business owning.
+  it('POST /ask — 409 with a user-facing error when no provider key is configured', async () => {
+    await prisma.llmProviderKey.deleteMany({});
+
     const res = await authedPost('/api/v1/ask')
       .send({ question: `what calls ${BUSIEST!.name}?`, model: 'claude' })
-      .expect(201);
+      .expect(409);
 
-    expect(typeof res.body.text).toBe('string');
-    expect(res.body.text.length).toBeGreaterThan(0);
-    expect(Array.isArray(res.body.cites)).toBe(true);
-    expect(res.body).toHaveProperty('note');
-    // Sourced from the shared model registry, so /models and /ask can't drift apart.
-    expect(res.body.model).toBe('claude-opus-5');
-
-    // The invariant that actually matters (CLAUDE.md §6, "never invents"): every cite must name a
-    // node that exists in the graph. Asserting a fixture's exact caller count tested the seed data;
-    // this tests the guarantee, and survives Ask becoming a real LLM call.
-    const graph = (await authed('/api/v1/graph').expect(200)).body;
-    const known = new Set(
-      (graph.nodes as GraphNode[]).flatMap((n) =>
-        [n.name, n.repo, n.host, n.id].filter((v): v is string => typeof v === 'string'),
-      ),
-    );
-    for (const cite of res.body.cites) {
-      expect(known.has(cite.name)).toBe(true);
-      expect(['confirmed', 'likely', 'uncertain']).toContain(cite.confidence);
-    }
+    expect(res.body).toEqual({ error: 'no API key configured for anthropic' });
   });
 
-  it('POST /ask — ungroundable question answers factually with no cites (never invents)', async () => {
+  it('POST /ask — an omitted model falls back to the registry default, not a 400', async () => {
+    await prisma.llmProviderKey.deleteMany({});
+
+    // Reaching the 409 at all proves the id resolved: an unresolvable model would have failed
+    // earlier and differently.
     const res = await authedPost('/api/v1/ask')
       .send({ question: 'what is the weather today?' })
-      .expect(201);
-    expect(res.body.cites).toEqual([]);
-    expect(typeof res.body.text).toBe('string');
-    // Model resolution doesn't depend on seeded graph data, so it's pinned here too: an omitted
-    // `model` falls back to the registry default rather than 400ing.
-    expect(res.body.model).toBe('claude-opus-5');
+      .expect(409);
+
+    expect(res.body.error).toContain('anthropic');
   });
 
   it('POST /ask — empty question rejected (validation)', async () => {

@@ -7,7 +7,11 @@ export class AskRequestDto {
   @MaxLength(2000)
   question!: string;
 
-  /** Selected model id (claude|gpt|llama). Cosmetic — echoed into the response `model` label. */
+  /**
+   * Model id the user picked from GET /models (`claude` | `gpt`). Selects which provider key is
+   * loaded and which model actually answers — no longer cosmetic. An unknown or omitted id falls
+   * back to the registry default rather than 400ing, so a stale UI bundle still gets an answer.
+   */
   @IsOptional()
   @IsString()
   model?: string;

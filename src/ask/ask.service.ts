@@ -1,16 +1,18 @@
-import { Injectable } from '@nestjs/common';
-import { resolveModel } from '../llm/model-registry';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { StoredGraphData } from '../common/graph-filter';
 import { GraphLookupService } from '../common/graph-lookup.service';
-import { EdgeDto, NodeDto, TopicContractDto } from '../common/types';
+import { EndpointContractDto, TopicContractDto } from '../common/types';
+import { describeForLog, toHttpException } from '../llm/llm-errors';
+import { LlmClientFactory } from '../llm/llm-client.factory';
+import { resolveModel } from '../llm/model-registry';
+import { LlmProviderError, LlmTurn, ToolResult } from '../llm/provider.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { LlmKeysService } from '../settings/llm-keys.service';
+import { buildSystemPrompt, extractEvidenceIds, stripEvidenceMarkup } from './ask-prompt';
+import { Catalog, CATALOG_TOOLS, executeCatalogTool } from './catalog-tools';
+import { AskCite, buildNote, EvidenceLedger } from './evidence';
 
-/** One piece of evidence the answer rests on (BACKEND-HANDOFF.md §5). */
-export interface AskCite {
-  name: string;
-  dir: string;
-  confidence: string;
-}
+export { AskCite };
 
 export interface AskResponse {
   text: string;
@@ -19,185 +21,152 @@ export interface AskResponse {
   model: string;
 }
 
-// The model string echoed into the "grounded in catalog · <model>" header comes from the shared
-// registry (src/llm/model-registry.ts), so the id the user picked, the provider key that will be
-// loaded, and the model sent upstream can't drift apart. An unknown id falls back to the default
-// rather than 400ing — a stale id from a cached UI bundle should still get an answer.
-//
-// NOTE: the answer engine below is still the deterministic resolver. It is replaced by a real
-// provider call in step 6 of LLM-KEYS-PLAN.md; the registry lookup lands early so /models and /ask
-// agree on the model vocabulary from here on.
+/**
+ * Caps one question's tool loop. Enough for discovery plus a couple of follow-ups; low enough that
+ * a model stuck in a loop can't run up the customer's bill or hold a request open indefinitely.
+ */
+const MAX_ITERATIONS = 6;
+
+/**
+ * Bounds thinking AND response text together on reasoning models. The answer is a short paragraph,
+ * but sizing this for the prose alone truncates it mid-sentence once thinking is counted.
+ */
+const MAX_TOKENS = 8000;
 
 /**
  * POST /api/v1/ask — grounded Q&A over the account catalog.
  *
- * Deterministic and grounded by construction: every answer is computed from the stored graph + Kafka
- * contracts, and every claim is backed by the actual edges/consumers it rests on (returned as
- * `cites`). It NEVER invents a call — an unrecognized question returns a factual "point me at a
- * service or topic" prompt with no cites, and an internal failure throws (the UI shows its explicit
- * "no answer" bubble). Mirrors the reference resolver in the UI's dev-server / DC file.
+ * The model reaches the graph only through the catalog tools, and it never authors a citation:
+ * tools record every relationship they return in an evidence ledger, the model names the ids it
+ * used, and the backend renders `cites` from the recorded rows (see evidence.ts). So "never
+ * invents" (CLAUDE.md §6) holds structurally rather than by the model's cooperation.
+ *
+ * Field ownership in the response: `text` comes from the model; `cites` and `note` are computed
+ * here from the ledger; `model` comes from the registry. Nothing the model writes is echoed
+ * unexamined.
+ *
+ * Failures never become answers. Every provider problem surfaces as a 4xx/5xx with an `error`
+ * string the UI renders in its "no answer" bubble (BACKEND-LLM-KEYS.md §4).
  */
 @Injectable()
 export class AskService {
+  private readonly logger = new Logger(AskService.name);
+
   constructor(
     private readonly lookup: GraphLookupService,
     private readonly prisma: PrismaService,
+    private readonly llmKeys: LlmKeysService,
+    private readonly clients: LlmClientFactory,
   ) {}
 
   async ask(
     accountId: string,
     branch: string,
     question: string,
-    model?: string,
+    modelId?: string,
   ): Promise<AskResponse> {
-    const modelLabel = resolveModel(model).wireModel;
+    const model = resolveModel(modelId);
 
-    const graph = await this.lookup.findGraph(accountId, branch);
-    if (!graph) {
+    const apiKey = await this.llmKeys.getKey(accountId, model.provider);
+    if (!apiKey) {
+      // Spec-exact wording — the UI shows this and points the user at Settings → LLM.
+      throw new ConflictException({ error: `no API key configured for ${model.provider}` });
+    }
+
+    const catalog = await this.loadCatalog(accountId, branch);
+    if (catalog.nodes.length === 0) {
+      // Nothing to ground an answer in. Saying so costs no tokens and is the honest answer.
       return {
         text: 'I answer from the current catalog, but no repositories have been scanned for this account yet.',
         cites: [],
         note: null,
-        model: modelLabel,
+        model: model.wireModel,
       };
     }
 
-    const data = graph.data as unknown as StoredGraphData;
-    const topicRows = await this.prisma.contract.findMany({
-      where: { graphId: graph.id, kind: 'kafka' },
-    });
-    const topics = topicRows.map((r) => r.data as unknown as TopicContractDto);
+    const ledger = new EvidenceLedger();
+    const client = this.clients.create(model.provider, apiKey);
+    const turns: LlmTurn[] = [{ role: 'user', text: question }];
 
-    return { ...answer(question, data.nodes ?? [], data.edges ?? [], topics), model: modelLabel };
-  }
-}
+    try {
+      for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        const completion = await client.complete({
+          model: model.wireModel,
+          fallbackModel: model.fallbackModel,
+          system: buildSystemPrompt(catalog),
+          tools: CATALOG_TOOLS,
+          turns,
+          maxTokens: MAX_TOKENS,
+        });
 
-// --- pure grounded resolver (no DB, no I/O) ---
+        if (completion.toolCalls.length === 0) {
+          return this.assemble(completion.text, ledger, model.wireModel);
+        }
 
-/** Display name for a node id — the friendly name, else its repo slug, else the raw id. */
-function labeller(nodes: NodeDto[]): (id: string) => string {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  return (id: string) => {
-    const n = byId.get(id);
-    return n?.name || n?.repo || id;
-  };
-}
+        turns.push({
+          role: 'assistant',
+          text: completion.text,
+          toolCalls: completion.toolCalls,
+        });
 
-/** Direction/method label for a cite: the Kafka topic ("via <topic>") or the REST method string. */
-const citeDir = (e: EdgeDto): string => (e.protocol === 'kafka' ? `via ${e.label}` : e.method);
-
-/**
- * Find the node and/or topic a free-text question is about. A node matches when the question mentions
- * its name, repo slug, or host (longest match wins, so "payment-service" beats a bare "service"); a
- * topic matches on its name. Substring match on the lowercased question, mirroring the UI reference.
- */
-function findEntity(
-  lc: string,
-  nodes: NodeDto[],
-  topics: TopicContractDto[],
-): { node: NodeDto | null; topic: TopicContractDto | null } {
-  let node: NodeDto | null = null;
-  let bestLen = 0;
-  for (const n of nodes) {
-    for (const cand of [n.name, n.repo, n.host]) {
-      const c = (cand ?? '').toLowerCase();
-      if (c && lc.includes(c) && c.length > bestLen) {
-        node = n;
-        bestLen = c.length;
+        // All results for one assistant turn go back together — splitting them across messages
+        // trains the model out of asking for tools in parallel.
+        const results: ToolResult[] = completion.toolCalls.map((call) => ({
+          id: call.id,
+          content: JSON.stringify(executeCatalogTool(call.name, call.input, { catalog, ledger })),
+        }));
+        turns.push({ role: 'tool', results });
       }
+
+      // Out of iterations with no final answer. The evidence gathered so far is real, so the
+      // honest move is to say we couldn't finish rather than to synthesise a conclusion.
+      this.logger.warn(`ask: hit the ${MAX_ITERATIONS}-iteration cap without a final answer`);
+      return this.assemble(
+        'I could not narrow that down from the catalog. Try naming a single service or Kafka topic.',
+        ledger,
+        model.wireModel,
+      );
+    } catch (err) {
+      if (err instanceof LlmProviderError) {
+        this.logger.warn(`ask: ${model.provider} call failed: ${describeForLog(err)}`);
+        throw toHttpException(err);
+      }
+      throw err;
     }
   }
 
-  let topic: TopicContractDto | null = null;
-  let tLen = 0;
-  for (const t of topics) {
-    const tn = t.topic.toLowerCase();
-    if (tn && lc.includes(tn) && tn.length > tLen) {
-      topic = t;
-      tLen = tn.length;
-    }
-  }
-
-  return { node, topic };
-}
-
-function answer(
-  question: string,
-  nodes: NodeDto[],
-  edges: EdgeDto[],
-  topics: TopicContractDto[],
-): Omit<AskResponse, 'model'> {
-  const lc = question.toLowerCase();
-  const nameOf = labeller(nodes);
-  const { node, topic } = findEntity(lc, nodes, topics);
-
-  // Who consumes / subscribes to a topic.
-  if (topic && /(consume|subscrib|listen|who.*(reads|gets))/.test(lc)) {
-    const cites: AskCite[] = topic.consumers.map((c) => ({
-      name: nameOf(c),
-      dir: 'consumes',
-      confidence: 'confirmed',
-    }));
-    const prod = topic.producer ? nameOf(topic.producer) : null;
+  /**
+   * Builds the response from the model's prose plus the backend-owned evidence. The citation
+   * bookkeeping is stripped from the text — the UI renders cites as its own affordance, so leaving
+   * `EVIDENCE: ev1` in the bubble would expose the plumbing.
+   */
+  private assemble(text: string, ledger: EvidenceLedger, wireModel: string): AskResponse {
+    const cites = ledger.resolveCites(extractEvidenceIds(text));
     return {
-      text: `${topic.consumers.length} service${topic.consumers.length === 1 ? '' : 's'} consume the ${topic.topic} topic${
-        prod ? `, produced by ${prod}` : ' — no producer was found in the scanned repositories'
-      }.`,
+      text: stripEvidenceMarkup(text),
       cites,
-      note: prod
-        ? null
-        : 'The producer of this topic is unresolved, so the message shape is recorded as uncertain.',
+      note: buildNote(cites),
+      model: wireModel,
     };
   }
 
-  // Dependents of a service (inbound / who calls it).
-  if (node && /(depend|calls?|who.*(call|use)|upstream|callers?)/.test(lc)) {
-    const inbound = edges.filter((e) => e.to === node.id);
-    const byConf = { confirmed: 0, likely: 0, uncertain: 0 };
-    for (const e of inbound) byConf[e.confidence]++;
-    const cites: AskCite[] = inbound
-      .slice(0, 8)
-      .map((e) => ({ name: nameOf(e.from), dir: citeDir(e), confidence: e.confidence }));
-    const uncertain = byConf.likely + byConf.uncertain;
+  /** The account's graph plus its contracts — the only data the tools can see. */
+  private async loadCatalog(accountId: string, branch: string): Promise<Catalog> {
+    const graph = await this.lookup.findGraph(accountId, branch);
+    if (!graph) return { nodes: [], edges: [], topics: [], endpoints: [] };
+
+    const data = graph.data as unknown as StoredGraphData;
+    const contracts = await this.prisma.contract.findMany({ where: { graphId: graph.id } });
+
     return {
-      text: `${inbound.length} ${inbound.length === 1 ? 'dependency points' : 'dependencies point'} at ${nameOf(node.id)} — ${byConf.confirmed} confirmed, ${byConf.likely} likely, ${byConf.uncertain} uncertain. These are derived from callers' code, not declared by ${nameOf(node.id)}.`,
-      cites,
-      note: uncertain
-        ? `${uncertain} of these rest on likely/uncertain edges — treat the list as indicative, not exhaustive.`
-        : null,
+      nodes: data.nodes ?? [],
+      edges: data.edges ?? [],
+      topics: contracts
+        .filter((c) => c.kind === 'kafka')
+        .map((c) => c.data as unknown as TopicContractDto),
+      endpoints: contracts
+        .filter((c) => c.kind === 'rest')
+        .map((c) => c.data as unknown as EndpointContractDto),
     };
   }
-
-  // What a service calls (outbound / downstream).
-  if (node && /(what.*(call|depend)|downstream|outbound|reach)/.test(lc)) {
-    const out = edges.filter((e) => e.from === node.id);
-    const cites: AskCite[] = out
-      .slice(0, 8)
-      .map((e) => ({ name: nameOf(e.to), dir: citeDir(e), confidence: e.confidence }));
-    return {
-      text: `${nameOf(node.id)} has ${out.length} outbound ${out.length === 1 ? 'dependency' : 'dependencies'}.`,
-      cites,
-      note: null,
-    };
-  }
-
-  // A named service with no matched intent → a factual summary that points the user at what to ask.
-  if (node) {
-    const inbound = edges.filter((e) => e.to === node.id).length;
-    const out = edges.filter((e) => e.from === node.id).length;
-    return {
-      text: `${nameOf(node.id)} has ${inbound} inbound and ${out} outbound ${
-        inbound + out === 1 ? 'dependency' : 'dependencies'
-      }. Ask who calls it, what it calls, or about a topic it produces or consumes.`,
-      cites: [],
-      note: null,
-    };
-  }
-
-  // Nothing matched — never invent. Tell the user how to ground a question.
-  return {
-    text: 'I answer only from the scanned catalog. Name a service (e.g. "what calls payment-service?") or a Kafka topic (e.g. "who consumes OrderCreated?").',
-    cites: [],
-    note: null,
-  };
 }

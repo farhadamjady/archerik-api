@@ -5,7 +5,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { encryptSecret } from '../common/secret-box';
+import { decryptSecret, encryptSecret } from '../common/secret-box';
 import { LlmClientFactory } from '../llm/llm-client.factory';
 import { describeForLog } from '../llm/llm-errors';
 import { LlmProviderError } from '../llm/provider.types';
@@ -102,6 +102,21 @@ export class LlmKeysService {
     });
 
     return { provider, configured: true, last4, updatedAt: row.updatedAt.toISOString() };
+  }
+
+  /**
+   * Decrypts the account's key for one provider, or null when none is configured.
+   *
+   * The ONLY method that returns key material. It exists for AskService, which must present the
+   * key to the provider on every question; `list` deliberately can't reach it. Callers must not
+   * cache or log the result — it is decrypted per request and discarded with it.
+   */
+  async getKey(accountId: string, provider: LlmProviderId): Promise<string | null> {
+    const row = await this.prisma.llmProviderKey.findUnique({
+      where: { accountId_provider: { accountId, provider } },
+      select: { keyEnc: true },
+    });
+    return row ? decryptSecret(Buffer.from(row.keyEnc), LLM_KEY_ENV_VAR) : null;
   }
 
   /**

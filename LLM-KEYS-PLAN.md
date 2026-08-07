@@ -69,9 +69,16 @@ previous one is committed.
       `get_endpoints`. Only *relationships* are citable — a bare service/topic listing records no
       evidence, so `cites` means "the facts this claim rests on", not "everything the model looked
       at". Tools never throw: bad names/args come back as an `error` field the model retries from.
-- [ ] **6 — Ask rewrite.** The tool loop in `ask.service.ts`; throttler on the controller.
-      *May split if it runs long — update this file first.*
-      *Green:* `test/ask-llm.e2e-spec.ts` against a stub provider.
+- [x] **6 — Ask rewrite.** Tool loop in `ask.service.ts`, grounding prompt in `ask-prompt.ts`,
+      throttler on the controller, `LlmKeysService.getKey()` (the only method returning key
+      material). *Green:* 13 tests in `test/ask-llm.e2e-spec.ts` against a scripted provider.
+      Loop capped at 6 iterations; `maxTokens` 8000 (bounds thinking + text together).
+      `test/jest-e2e.json` now pins `maxWorkers: 1` — suites boot the real app against ONE shared
+      Postgres, and the two suites mutating `llm_provider_keys` raced each other in parallel
+      workers, failing in ways that didn't reproduce when run alone.
+      The `/ask` behaviour tests moved out of `contract.e2e-spec.ts` (which now asserts only the
+      no-key 409) and into `ask-llm.e2e-spec.ts`, where the stub lives.
+      **Still not verified against a live provider** — see step 4's note.
 - [ ] **7 — docs.** `API-CONTRACT.md`, add `llm_provider_keys` to the `truncate-cartograph-db`
       skill's preserve list (it is account config, like the extractor key — a reset must not
       force re-entering provider keys), delete this file.
