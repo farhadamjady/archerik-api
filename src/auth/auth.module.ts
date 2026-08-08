@@ -13,7 +13,12 @@ import { SsoService } from './sso/sso.service';
     // Not registered as APP_GUARD — only POST /auth/sso/start opts in via @UseGuards(ThrottlerGuard),
     // so this doesn't touch the separate /v1/* extractor quota system. Limit is generous enough for
     // a legitimate user retrying a typo'd email a few times, while still blunting bulk domain probing.
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 20 }],
+      // Default is "ThrottlerException: Too many requests" — a class name the UI would render
+      // verbatim into a user-facing bubble. /ask shares this limiter, so it is reachable.
+      errorMessage: 'Too many requests — wait a moment and try again.',
+    }),
   ],
   controllers: [AuthController, MeController],
   providers: [

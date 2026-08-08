@@ -2,6 +2,7 @@ import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { ErrorBodyFilter } from './common/error-body.filter';
 
 async function bootstrap(): Promise<void> {
   // rawBody: true captures req.rawBody so /v1/ingest can byte-compare against the stored baseline.
@@ -27,6 +28,10 @@ async function bootstrap(): Promise<void> {
       forbidNonWhitelisted: true,
     }),
   );
+
+  // Normalises every non-2xx body to { error }. Registered after the pipe so validation
+  // rejections pass through it too.
+  app.useGlobalFilters(new ErrorBodyFilter());
 
   const origins = process.env.CORS_ORIGINS ?? '*';
   app.enableCors({

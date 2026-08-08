@@ -3,6 +3,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { ErrorBodyFilter } from '../src/common/error-body.filter';
 
 /** Demo credentials created by prisma/seed.ts. */
 export const DEMO_CREDENTIALS = { email: 'demo@acme.com', password: 'demo1234' };
@@ -10,7 +11,8 @@ export const DEMO_CREDENTIALS = { email: 'demo@acme.com', password: 'demo1234' }
 export const DEMO_API_KEY = 'ekg_dev_local_demokey';
 
 /**
- * Boots the app exactly as main.ts does (rawBody + prefix exclusion + strict ValidationPipe).
+ * Boots the app exactly as main.ts does (rawBody + prefix exclusion + strict ValidationPipe +
+ * the { error } body filter — so error-shape assertions here mean what they say in production).
  *
  * `customize` hooks the testing-module builder before compile, so a suite can swap a provider for a
  * stub — e.g. overriding LlmClientFactory to exercise provider failure paths without network access.
@@ -31,6 +33,7 @@ export async function createTestApp(
   app.useGlobalPipes(
     new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }),
   );
+  app.useGlobalFilters(new ErrorBodyFilter());
   await app.init();
   return app;
 }

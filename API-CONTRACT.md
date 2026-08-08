@@ -20,6 +20,11 @@ Conventions:
 - Auth: every request carries `Authorization: Bearer <token>` once logged in. Any endpoint may
   return `401` — the UI treats that globally as "session expired", clears the token, and shows the
   login screen.
+- **Every non-2xx body is `{ "error": "<string>" }` — always, with no other keys.** That includes
+  errors no one wrote by hand: request-validation failures and rate-limit rejections are normalised
+  into the same shape (`src/common/error-body.filter.ts`), so the UI can render `error` verbatim on
+  any failure without a fallback. Unexpected server errors return a generic string; details stay in
+  the server log.
 - **Read model scope (account = the company):** the read endpoints (`/graph`, `/contracts`,
   `/commits`) are scoped to the **account** the logged-in user belongs to — derived from the session
   token, never a query param. After login the UI needs no repo to start: `GET /graph` with no params
@@ -198,7 +203,7 @@ Request: `{ "question": "what depends on PaymentService?", "model": "claude" }` 
 | Status | When |
 |---|---|
 | `409` | No key configured for the chosen model's provider — e.g. `no API key configured for anthropic`. The UI points the user at Settings → LLM. |
-| `429` | The provider rate-limited the request. |
+| `429` | The provider rate-limited the request, **or** this backend did (20 requests/minute per client). |
 | `502` | The provider rejected the stored key, or declined to answer. |
 | `503` | The provider is unavailable. |
 | `504` | The provider timed out. |
