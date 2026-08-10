@@ -1,4 +1,4 @@
-// Name -> service_id resolution (INGEST-CONTRACT.md §6). The extractor emits a raw `target_name`
+// Name -> service_id resolution. The extractor emits a raw `target_name`
 // and never guesses the service_id — that mapping is ours to own, as a function of the fleet
 // registry (every service that has scanned its default branch is "known").
 //
@@ -64,7 +64,7 @@ export function externalKey(dep: OutboundDependency): string {
 }
 
 /** Build target_resolutions for every outbound dependency: its identity key -> a known `service_id`
- *  (from the fleet registry) or `"external"`. Name-only resolution (INGEST-CONTRACT.md §6) — the
+ *  (from the fleet registry) or `"external"`. Name-only resolution — the
  *  extractor emits a raw `target_name` and never guesses the service_id, so that mapping is ours. */
 export function resolveAll(
   deps: OutboundDependency[],

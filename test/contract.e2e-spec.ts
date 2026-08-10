@@ -90,7 +90,7 @@ describe('P0 API contract', () => {
       expect(node).not.toHaveProperty('deg');
       expect(node).not.toHaveProperty('inDeg');
     }
-    // Every service node carries explicit repo + host (API-CONTRACT.md §1).
+    // Every service node carries explicit repo + host.
     const services = res.body.nodes.filter((n: GraphNode) => n.type === 'service');
     expect(services.length).toBeGreaterThan(0); // the filter matched something
     for (const node of services) {
@@ -185,7 +185,7 @@ describe('P0 API contract', () => {
   });
 
   // Ask now answers via the account's own provider key, so with none configured the contract is a
-  // 409 (API-CONTRACT.md §4). The grounded-answer behaviour — the tool loop, the evidence
+  // 409. The grounded-answer behaviour — the tool loop, the evidence
   // ledger, error mapping — is covered in ask-llm.e2e-spec.ts against a scripted provider, since
   // asserting it here would mean either a real API call or a stub this suite has no business owning.
   it('POST /ask — 409 with a user-facing error when no provider key is configured', async () => {

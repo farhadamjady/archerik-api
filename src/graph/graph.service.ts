@@ -35,7 +35,7 @@ export class GraphService {
     // Account is the scope; repo/service just subset it (whole account when neither is set).
     const { data } = filterGraph(stored, { repo: query.repo, service: query.service });
 
-    // Flat envelope per API-CONTRACT.md — no `meta`, no deg/inDeg/outDeg (UI computes those).
+    // Flat envelope — no `meta` wrapper, no deg/inDeg/outDeg (the UI computes those itself).
     return {
       org: data.org ?? null,
       repo: query.repo ?? null,

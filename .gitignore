@@ -27,3 +27,6 @@ npm-debug.log*
 # test
 /coverage
 
+
+# local agent/tool config — kept empty in the repo
+.claude/

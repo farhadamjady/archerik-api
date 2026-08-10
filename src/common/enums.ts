@@ -1,6 +1,7 @@
 /**
- * Canonical enum values from API-CONTRACT.md. The UI validates these strictly and fails loudly on
- * any unknown value, so these are the single source of truth for what the backend may emit.
+ * The canonical enum values, and the single source of truth for what the backend may emit. The UI
+ * validates these strictly and fails loudly on any unknown value, so widening one here without
+ * widening it there is a user-visible break. src/common/integrity.ts enforces them on our own output.
  */
 
 export const CONFIDENCE = ['confirmed', 'likely', 'uncertain'] as const;

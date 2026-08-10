@@ -1,7 +1,7 @@
 import { LlmProviderId } from './providers';
 
 /**
- * One selectable Ask model, as the UI sees it (API-CONTRACT.md §5).
+ * One selectable Ask model, as the UI sees it.
  *
  * `provider` is what lets the UI gate the picker: it cross-references this against
  * GET /settings/llm-keys and flags models whose provider has no key ("needs key"). A model with no

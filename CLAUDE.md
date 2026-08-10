@@ -3,11 +3,13 @@
 Orientation for anyone (human or coding agent) changing this repository. It explains what the
 service is, how a request flows through it, and the invariants that must survive every change.
 
-For the wire shapes themselves, read the two contract documents — they win over this file wherever
-they disagree, because clients validate against them:
+For the wire shapes themselves, the code is the specification — clients validate strictly, so a
+comment can drift but the types cannot:
 
-- [`API-CONTRACT.md`](./API-CONTRACT.md) — the **read** API (`/api/v1`) the UI consumes
-- [`INGEST-CONTRACT.md`](./INGEST-CONTRACT.md) — the **write** API (`/v1`) scanners submit to
+- **Read API (`/api/v1`)** — `src/common/types.ts` for the shapes, `src/common/enums.ts` for the
+  permitted values, `test/contract.e2e-spec.ts` for what live responses must satisfy.
+- **Ingest API (`/v1`)** — `src/ingest/model.ts` for the body and diff vocabulary,
+  `test/ingest.e2e-spec.ts` for the gates and baseline semantics.
 
 ---
 
@@ -50,7 +52,7 @@ Three repositories, of which this is one:
 | `service-discovery-backend-ui` | the web UI that reads the catalog |
 
 Only this backend needs to exist for the API to be useful; the ingest contract is plain HTTP + JSON,
-so any scanner that can produce the body in `INGEST-CONTRACT.md` §4 works.
+so any scanner that can produce the body typed in `src/ingest/model.ts` works.
 
 **Stack:** NestJS 10 (TypeScript) · PostgreSQL via Prisma · Docker Compose for local Postgres.
 

@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createTestApp, DEMO_API_KEY, DEMO_CREDENTIALS } from './e2e-utils';
 
 /**
- * Extractor control-plane e2e (INGEST-CONTRACT.md §2/§3). Requires `docker compose up -d db` +
+ * Extractor control-plane e2e. Requires `docker compose up -d db` +
  * `prisma db seed` (creates the demo Account + API key). A fresh random service_id per run keeps
  * "first scan" deterministic without cross-run baseline collisions.
  */

@@ -1,8 +1,8 @@
-// Wire vocabulary the extractor speaks (INGEST-CONTRACT.md §4). These are the fields we read/diff;
+// Wire vocabulary the extractor speaks. These are the fields we read/diff;
 // extra fields the extractor sends are preserved (we store raw bytes) but not typed here.
 
 /**
- * One node of a request/response/message schema (INGEST-CONTRACT.md §4a). The SAME recursive shape
+ * One node of a request/response/message schema. The SAME recursive shape
  * appears at the root (endpoint request/response, kafka schema) and at every nested field — a root
  * has no `name`, a field does. The extractor emits only non-empty keys (`required` excepted — always
  * present); we store what arrives VERBATIM and never synthesize structure, because a missing or
@@ -101,10 +101,10 @@ export const EMPTY_SERVICE: ServiceBody = {
   config_dependencies: [],
 };
 
-// --- Diff shapes (INGEST-CONTRACT.md §5) ---
+// --- Diff shapes ---
 
 /**
- * One field-level schema change (INGEST-CONTRACT.md §5/§4a). A node is identified by its
+ * One field-level schema change. A node is identified by its
  * **wire-name path** from the edge root (`customer.address`, `lines[].sku`; `""` = the root itself).
  * - path present on one side only → `add` / `remove` (with the node's `type`).
  * - same path, different type facet (`type`/`items`/`key_type`/`value_type`) → `change` with `from`→`to`.
@@ -147,7 +147,7 @@ export interface GraphDiff {
   target_resolutions: Record<string, string>;
 }
 
-/** The /v1/ingest 2xx response (INGEST-CONTRACT.md §3). */
+/** The /v1/ingest 2xx response. */
 export interface IngestResponse {
   service_id: string;
   unchanged: boolean;
@@ -157,7 +157,7 @@ export interface IngestResponse {
   markdown: string;
 }
 
-/** The /v1/auth/validate 200 body (INGEST-CONTRACT.md §2). */
+/** The /v1/auth/validate 200 body. */
 export interface Entitlement {
   plan: string;
   quota_remaining: number;

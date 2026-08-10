@@ -11,7 +11,7 @@ import { Response } from 'express';
 /**
  * Makes one promise true everywhere: **every non-2xx body is `{ "error": "<string>" }`**.
  *
- * The UI renders that string verbatim (API-CONTRACT.md §4), so the shape has to hold for
+ * The UI renders that string verbatim, so the shape has to hold for
  * errors we never wrote by hand. Without this filter it held only for the exceptions we raise
  * ourselves; two common failures still emitted framework defaults:
  *

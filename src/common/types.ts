@@ -1,8 +1,10 @@
 /**
- * Response shapes exactly as documented in API-CONTRACT.md.
+ * The wire shapes of the read API — this file is their definition of record.
  *
- * These are the wire types the UI binds to. Do NOT add fields the UI computes itself
+ * These are the types the UI binds to, and it validates them strictly: an unexpected field or a
+ * missing one fails its whole load rather than degrading. Do NOT add fields the UI computes itself
  * (deg/inDeg/outDeg) or wrappers it doesn't expect (e.g. a { commits: [...] } envelope).
+ * test/contract.e2e-spec.ts asserts these shapes against live HTTP responses.
  */
 
 import { ChangeKind, ChangeOp, Confidence, ContractKind, NodeType, Protocol } from './enums';
@@ -76,7 +78,7 @@ export interface GraphResponse {
 /**
  * One node of a request/response/message schema. Recursive: a field whose type is a DTO carries its
  * children in `nested`, up to the extractor's truncation boundary. The wire shape mirrors the
- * extractor's `Schema` (INGEST-CONTRACT.md §4a) — the backend passes it through VERBATIM (never
+ * extractor's `Schema` — the backend passes it through VERBATIM (never
  * flattens, never synthesizes), so the UI renders nested tables, enum/constraint chips, and
  * collapsed-truncation nodes directly. Only non-empty keys are emitted (`name`/`type`/`nullable`
  * always present; `note` kept for provenance).

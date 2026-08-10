@@ -8,7 +8,7 @@ export type RequestWithAccount = Request & { account: Account };
 
 /**
  * Guards the extractor's /v1/* routes. A valid Bearer API key is the 401 gate on BOTH
- * /v1/auth/validate and /v1/ingest (INGEST-CONTRACT.md §2/§3 — re-validate at submit). Attaches
+ * /v1/auth/validate and /v1/ingest (re-validate at submit). Attaches
  * the resolved Account to the request. Applied per-controller with @UseGuards; these routes are also
  * @Public() so the global session guard skips them.
  */

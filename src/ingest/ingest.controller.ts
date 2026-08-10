@@ -17,7 +17,7 @@ import { IngestResponse } from './model';
 import { IngestService } from './ingest.service';
 
 /**
- * POST /v1/ingest — the robust gate + per-commit diff engine (INGEST-CONTRACT.md §3).
+ * POST /v1/ingest — the robust gate + per-commit diff engine.
  * Commit metadata rides in X-EKG-* headers so the body stays the pure, byte-stable graph. We read
  * req.rawBody (enabled in main.ts) so the "unchanged" fast path is a raw byte comparison.
  * @Public() skips the session guard; ApiKeyGuard re-validates the key (401) at submit.

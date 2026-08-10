@@ -6,9 +6,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, login } from './e2e-utils';
 
 /**
- * Settings → LLM tab (API-CONTRACT.md §7).
+ * Settings → LLM tab.
  *
- * Mirrors the behaviour API-CONTRACT.md §7 pins:
+ * Pins the behaviour the UI depends on:
  * GET returns configured/last4 only; PUT returns 422 (unknown provider) / 400 (empty key) and never
  * echoes the key; DELETE is 204 and idempotent.
  */
@@ -181,7 +181,7 @@ describe('Settings → LLM provider keys', () => {
 });
 
 /**
- * Key verification at save time (API-CONTRACT.md §7). Runs against a stubbed LlmClientFactory,
+ * Key verification at save time. Runs against a stubbed LlmClientFactory,
  * so it exercises the real service logic with no network access and no real provider key.
  */
 describe('Settings → LLM key verification', () => {

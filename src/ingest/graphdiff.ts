@@ -1,4 +1,4 @@
-// Semantic diff over two Service bodies (INGEST-CONTRACT.md §5). Pure function of (baseline, head).
+// Semantic diff over two Service bodies. Pure function of (baseline, head).
 //
 // CRITICAL: the identity keys MUST match the extractor's exactly (`internal/model/identity.go`) or
 // diffs desync — the same edge would look added+removed across scans.
@@ -25,7 +25,7 @@ export const kafkaKey = (k: KafkaEdge, direction: 'producer' | 'consumer'): stri
   `${k.topic}|${direction}`;
 
 /**
- * The type facet of a schema node — what a "type change" is judged on (INGEST-CONTRACT.md §5):
+ * The type facet of a schema node — what a "type change" is judged on:
  * arrays fold in their element type, maps their key/value types, so `array<Line>`→`array<Item>` or
  * `map<String,A>`→`map<String,B>` register as changes even though `type` ("array"/"map") is unchanged.
  */
@@ -53,7 +53,7 @@ function changedAttrs(b: Schema, h: Schema): string[] {
 }
 
 /**
- * Field-path diff of two schemas (INGEST-CONTRACT.md §5/§4a). Recurses to the truncation boundary;
+ * Field-path diff of two schemas. Recurses to the truncation boundary;
  * each node is keyed by its wire-name path from the edge root (`""` = root). A path on one side only
  * is add/remove; a differing type facet is a type change; a same-type node with a differing attribute
  * is an attribute change. Wire names are unique within a `nested` list, so name is a safe key.

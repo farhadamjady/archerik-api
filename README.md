@@ -12,7 +12,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![Tests](https://img.shields.io/badge/e2e-117%20passing-success?style=flat-square)](#-testing)
 
-**[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[API](#-api-reference)** · **[Ask](#-ask--bring-your-own-key)** · **[Contributing](./CONTRIBUTING.md)**
+**[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[API](#-api-reference)** · **[Ask](#-ask--bring-your-own-key)** · **[Contributing](#-contributing)**
 
 </div>
 
@@ -114,8 +114,8 @@ Only a default-branch scan does that.
 
 > [!NOTE]
 > The scanner itself lives in a separate repository (a Go CLI). Nothing here is Go-specific — the
-> ingest contract is plain HTTP and JSON, so **any** program that can produce the body described in
-> [`INGEST-CONTRACT.md`](./INGEST-CONTRACT.md) works. 🐍 🦀 ☕ 🐹
+> ingest contract is plain HTTP and JSON, so **any** program that can produce the body typed in
+> `src/ingest/model.ts` works — there's a complete worked example under [Quick start](#-quick-start). 🐍 🦀 ☕ 🐹
 
 ---
 
@@ -288,8 +288,10 @@ provider keys.
 
 ## 📡 API reference
 
-Two surfaces. Full wire shapes live in [`API-CONTRACT.md`](./API-CONTRACT.md) (read) and
-[`INGEST-CONTRACT.md`](./INGEST-CONTRACT.md) (write).
+Two surfaces. The exact wire shapes are defined by the code that serves them —
+`src/common/types.ts` and `src/common/enums.ts` for the read side, `src/ingest/model.ts` for the
+ingest side — and pinned against live responses in `test/contract.e2e-spec.ts` and
+`test/ingest.e2e-spec.ts`.
 
 > [!IMPORTANT]
 > **Every non-2xx body is `{ "error": "<string>" }` and nothing else** — including validation
@@ -336,8 +338,8 @@ Clients validate strictly, so both matter.
 
 ### 🤖 Ingest API (`/v1`)
 
-API key required. See [`INGEST-CONTRACT.md`](./INGEST-CONTRACT.md) for the full body shape, diff
-format, and resolution rules.
+API key required. The body shape, diff format and resolution rules are typed in
+`src/ingest/model.ts`; `test/ingest.e2e-spec.ts` exercises the whole round trip.
 
 | Method & path | Notes |
 |---|---|
@@ -560,14 +562,27 @@ rendering, password + OIDC SSO authentication, per-account LLM key management, a
 
 ## 🤝 Contributing
 
-Contributions welcome! See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for setup, conventions, and what a
-good pull request looks like.
+Contributions welcome. [`CLAUDE.md`](./CLAUDE.md) is the architectural orientation — how a request
+flows through the service, why the storage decisions are what they are, and the **ten invariants
+that must not break** (§6). Please read those before changing anything in `src/ingest/` or
+`src/common/`. 📖
 
-[`CLAUDE.md`](./CLAUDE.md) is the architectural orientation for contributors and coding agents —
-including the **ten invariants that must not break** (§6). Please read those before changing anything
-in `src/ingest/` or `src/common/`. 📖
+A few house rules:
 
-🔐 Security issues: please don't open a public issue — see [`SECURITY.md`](./SECURITY.md).
+- Run `npm run typecheck`, `npm run lint` and `npm run test:e2e` before pushing.
+- **A wire-shape change is a contract change.** Clients validate strictly and fail loudly, so say so
+  explicitly in the PR description.
+- **Comments explain _why_, not _what_.** If a decision would look arbitrary to someone reading it
+  cold, write down the constraint that forced it.
+- **Keep the pure things pure.** `graphdiff.ts` and `project.ts` take data and return data. Needing
+  the database inside one means the call belongs a layer up.
+- **Stay factual.** No severity ratings or "breaking change" labels in API text or the PR-comment
+  markdown. The tool reports; humans judge.
+- Schema changes need a migration (`npx prisma migrate dev --name what_changed`) in the same PR.
+
+🔐 **Security issues:** please report them privately via GitHub's
+[private vulnerability reporting](https://github.com/farhadamjady/service-discovery-backend-chore/security/advisories/new)
+rather than a public issue.
 
 ---
 

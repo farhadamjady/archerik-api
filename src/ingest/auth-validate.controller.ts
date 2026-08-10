@@ -7,7 +7,7 @@ import { Entitlement } from './model';
 import { IngestService } from './ingest.service';
 
 /**
- * POST /v1/auth/validate — the extractor's startup entitlement gate (INGEST-CONTRACT.md §2).
+ * POST /v1/auth/validate — the extractor's startup entitlement gate.
  * Empty body, Bearer API key. Status codes drive the CLI's exit codes:
  *   200 valid · 401 bad key (ApiKeyGuard) · 403 not entitled · 429 quota exceeded.
  * @Public() so the global session guard skips; ApiKeyGuard is the real gate.
