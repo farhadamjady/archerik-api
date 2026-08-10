@@ -47,12 +47,12 @@ source — and, crucially, **tells you where reading the source wasn't enough.**
 
 That last part is the design centre of this project:
 
-| | Principle | What it means |
-|:--:|---|---|
-| 🎯 | **Confidence on everything** | Every edge is `confirmed` (declared in code — `@FeignClient`, a literal `KafkaTemplate.send("topic")`), `likely` (inferred — a `WebClient` base URL from config), or `uncertain` (guessed — a `RestTemplate` call to a runtime variable). |
-| 👻 | **Unresolved stays visible** | A call to a hostname matching no scanned service doesn't vanish. It becomes an `unknown` node carrying a note explaining *why* it couldn't be resolved. Deleting it would be a lie by omission. |
-| 🚫 | **Nothing is invented** | Not by the extractor, and not by the LLM — Ask's citations are rendered from a server-side evidence ledger, so a made-up citation resolves to nothing and is dropped. |
-| ⚖️ | **No judgments** | The catalog reports that a field changed type. It does not tell you that's a breaking change. Severity is a human call with context the tool doesn't have. |
+| Principle | What it means |
+|---|---|
+| **Confidence on everything** | Every edge is `confirmed` (declared in code — `@FeignClient`, a literal `KafkaTemplate.send("topic")`), `likely` (inferred — a `WebClient` base URL from config), or `uncertain` (guessed — a `RestTemplate` call to a runtime variable). |
+| **Unresolved stays visible** | A call to a hostname matching no scanned service doesn't vanish. It becomes an `unknown` node carrying a note explaining *why* it couldn't be resolved. Deleting it would be a lie by omission. |
+| **Nothing is invented** | Not by the extractor, and not by the LLM — Ask's citations are rendered from a server-side evidence ledger, so a made-up citation resolves to nothing and is dropped. |
+| **No judgments** | The catalog reports that a field changed type. It does not tell you that's a breaking change. Severity is a human call with context the tool doesn't have. |
 
 > [!IMPORTANT]
 > If you only remember one thing about this codebase: **uncertainty is data, not an error state.**
@@ -73,37 +73,16 @@ quietly promoting the third into the first so the output looks tidier.
 ## ⚙️ How it works
 
 ```mermaid
-flowchart LR
-    subgraph CI["🤖 CI pipeline"]
-        S["Scanner<br/><i>walks your repos</i>"]
-    end
-
-    subgraph BE["🗺️ Cartograph backend"]
-        direction TB
-        G["1 · Gate<br/><i>entitlement + limits</i>"]
-        B["2 · Byte-compare<br/><i>unchanged? stop</i>"]
-        D["3 · Semantic diff"]
-        R["4 · Resolve targets"]
-        W["5 · Write baseline<br/><i>default branch only</i>"]
-        P["6 · Re-project catalog"]
-        G --> B --> D --> R --> W --> P
-    end
-
-    subgraph UI["👩‍💻 Humans"]
-        U["Web UI<br/><i>catalog + Ask</i>"]
-    end
-
-    DB[("🐘 PostgreSQL")]
-
-    S -->|"POST /v1/ingest — 🔑 API key"| G
-    D -.->|"📝 PR comment markdown"| S
-    U -->|"GET /api/v1/graph — 🎫 session token"| P
-    P --> DB
-    W --> DB
-
-    style BE fill:#f6f8fa,stroke:#57606a
-    style CI fill:#fff8e6,stroke:#bf8700
-    style UI fill:#eef6ff,stroke:#0969da
+flowchart TD
+    S[Scanner in CI] -->|POST /v1/ingest — API key| G
+    G[Gate: entitlement + limits] --> B[Byte-compare against baseline]
+    B --> D[Semantic diff]
+    D --> R[Resolve targets]
+    R --> W[Write baseline — default branch only]
+    W --> P[Re-project catalog]
+    P --> DB[(PostgreSQL)]
+    D -.->|PR comment markdown| S
+    U[Web UI] -->|GET /api/v1/graph — session token| P
 ```
 
 ### 🔐 Two API surfaces, deliberately kept apart
@@ -111,7 +90,7 @@ flowchart LR
 CI writes at `/v1` with a long-lived **API key**. Humans read at `/api/v1` with a short-lived
 **session token**. Neither credential works on the other's routes.
 
-| | 🤖 Ingest API | 👤 Read API |
+| | Ingest API | Read API |
 |---|---|---|
 | **Path** | `/v1` | `/api/v1` |
 | **Credential** | API key (long-lived) | session token (7 days) |
@@ -281,9 +260,9 @@ inline and is the file to copy.
 | `SESSION_TTL_HOURS` | `168` | Session lifetime (7 days). |
 | `APP_URL` | `http://localhost:5173` | Where the SSO callback lands the browser — your frontend. |
 | `BACKEND_PUBLIC_URL` | — | This backend's externally reachable URL. Every tenant's IdP registers `${BACKEND_PUBLIC_URL}/api/v1/auth/sso/callback` as its redirect URI. |
-| `SSO_ENCRYPTION_KEY` | — | 🔑 **Required.** 32-byte base64. Encrypts each SSO connection's OIDC client secret. |
+| `SSO_ENCRYPTION_KEY` | — | **Required.** 32-byte base64. Encrypts each SSO connection's OIDC client secret. |
 | `SSO_STATE_TTL_MINUTES` | `10` | How long an in-flight SSO login stays valid. |
-| `LLM_ENCRYPTION_KEY` | — | 🔑 **Required.** 32-byte base64. Encrypts stored provider API keys. |
+| `LLM_ENCRYPTION_KEY` | — | **Required.** 32-byte base64. Encrypts stored provider API keys. |
 | `LLM_VERIFY_KEYS` | `true` | Verify a provider key before storing it. Set `false` offline, or every save fails. |
 | `LLM_REQUEST_TIMEOUT_MS` | `60000` | Per-request provider timeout. Keep it under your proxy's. |
 
@@ -303,7 +282,7 @@ provider keys.
 | | Examples | Storage | Why |
 |---|---|---|---|
 | Presented **to** us | API keys, session tokens, passwords | 🔒 SHA-256 (bcrypt for passwords) | We only ever compare them. A DB dump can't be replayed. |
-| Presented **onward** | OIDC client secrets, LLM provider keys | 🔐 AES-256-GCM | They must be recoverable to be sent upstream. |
+| Presented **onward** | OIDC client secrets, LLM provider keys | AES-256-GCM | They must be recoverable to be sent upstream. |
 
 ---
 
@@ -319,25 +298,25 @@ Two surfaces. Full wire shapes live in [`API-CONTRACT.md`](./API-CONTRACT.md) (r
 
 ### 👤 Read API (`/api/v1`)
 
-Session token required (`Authorization: Bearer <token>`) except where marked 🌐 **public**. Scoped to
+Session token required (`Authorization: Bearer <token>`) except where marked **public**. Scoped to
 the account the user belongs to — derived from the token, never from a query parameter.
 
-| | Method & path | Returns |
-|:--:|---|---|
-| ❤️ | `GET /health` | Liveness + DB status. 🌐 |
-| 🔑 | `POST /auth/login` | `{ token, user }`; `401` on bad credentials. 🌐 |
-| 🙋 | `GET /me` | Session restore → `{ name, handle, team }`. |
-| 👋 | `POST /auth/logout` | Revokes the token server-side. |
-| 🏢 | `POST /auth/sso/start` | `{ sso: true, redirectUrl }` or `{ sso: false }`. 🌐 Rate-limited. |
-| ↩️ | `GET /auth/sso/callback` | IdP redirect target. 🌐 |
-| 🗺️ | `GET /graph` | The whole catalog: `{ org, repo, branch, scannedAt, teams[], nodes[], edges[] }`. |
-| 📜 | `GET /contracts` | `{ endpoints[], topics[] }` with field-level schemas. |
-| 🕰️ | `GET /commits` | Bare array of architecture-relevant commits. Currently `[]` — see [Status](#-status--roadmap). |
-| 🤖 | `POST /ask` | Grounded Q&A over the catalog. Rate-limited. |
-| 📋 | `GET /models` | The Ask model picker's options. |
-| ⚙️ | `GET /settings/llm-keys` | One status entry per provider — never the key itself. |
-| 💾 | `PUT /settings/llm-keys` | Store a provider key (verified first, then encrypted). |
-| 🗑️ | `DELETE /settings/llm-keys/:provider` | `204`, idempotent. |
+| Method & path | Returns |
+|---|---|
+| `GET /health` | Liveness + DB status. **Public.** |
+| `POST /auth/login` | `{ token, user }`; `401` on bad credentials. **Public.** |
+| `GET /me` | Session restore → `{ name, handle, team }`. |
+| `POST /auth/logout` | Revokes the token server-side. |
+| `POST /auth/sso/start` | `{ sso: true, redirectUrl }` or `{ sso: false }`. **Public**, rate-limited. |
+| `GET /auth/sso/callback` | IdP redirect target. **Public.** |
+| `GET /graph` | The whole catalog: `{ org, repo, branch, scannedAt, teams[], nodes[], edges[] }`. |
+| `GET /contracts` | `{ endpoints[], topics[] }` with field-level schemas. |
+| `GET /commits` | Bare array of architecture-relevant commits. Currently `[]` — see [Status](#-status--roadmap). |
+| `POST /ask` | Grounded Q&A over the catalog. Rate-limited. |
+| `GET /models` | The Ask model picker's options. |
+| `GET /settings/llm-keys` | One status entry per provider — never the key itself. |
+| `PUT /settings/llm-keys` | Store a provider key (verified first, then encrypted). |
+| `DELETE /settings/llm-keys/:provider` | `204`, idempotent. |
 
 **Optional filters** on `/graph`, `/contracts`, `/commits`: `repo`, `service`, `branch` (default
 `main`), `at` (commit SHA) — plus `protocol` on `/contracts` and `since`/`limit` on `/commits`.
@@ -360,10 +339,10 @@ Clients validate strictly, so both matter.
 API key required. See [`INGEST-CONTRACT.md`](./INGEST-CONTRACT.md) for the full body shape, diff
 format, and resolution rules.
 
-| | Method & path | Notes |
-|:--:|---|---|
-| 🚪 | `POST /v1/auth/validate` | Startup gate. Empty body → `{ plan, quota_remaining, expires_at }`. `401` bad key · `403` not entitled · `429` quota exceeded. **Free** — doesn't consume quota. |
-| 📥 | `POST /v1/ingest` | Submit one service's graph, get the diff + PR-comment markdown. Re-validates the key. Commit metadata rides in `X-EKG-*` headers so the body stays the pure graph. |
+| Method & path | Notes |
+|---|---|
+| `POST /v1/auth/validate` | Startup gate. Empty body → `{ plan, quota_remaining, expires_at }`. `401` bad key · `403` not entitled · `429` quota exceeded. **Free** — doesn't consume quota. |
+| `POST /v1/ingest` | Submit one service's graph, get the diff + PR-comment markdown. Re-validates the key. Commit metadata rides in `X-EKG-*` headers so the body stays the pure graph. |
 
 The behaviours that surprise people, up front:
 
@@ -400,18 +379,14 @@ This is enforced **structurally**, not by asking the model nicely:
 
 ```mermaid
 flowchart LR
-    Q["❓ Question"] --> M["🧠 Model"]
-    M -->|"calls"| T["🔧 Catalog tools<br/><i>read-only</i>"]
-    T -->|"returns rows"| M
-    T -->|"records every row"| L["📒 Evidence ledger<br/><i>server-side</i>"]
-    M -->|"names ids it used"| V{"🔎 Resolve<br/>against ledger"}
+    Q[Question] --> M[Model]
+    M -->|calls| T[Catalog tools, read-only]
+    T -->|returns rows| M
+    T -->|records every row| L[Evidence ledger, server-side]
+    M -->|names ids it used| V{Resolve against ledger}
     L --> V
-    V -->|"✅ found"| C["cites[]"]
-    V -->|"❌ invented"| X["🗑️ dropped"]
-
-    style L fill:#e6ffed,stroke:#1a7f37
-    style X fill:#ffebe9,stroke:#cf222e
-    style C fill:#e6ffed,stroke:#1a7f37
+    V -->|found| C[cites]
+    V -->|invented| X[dropped]
 ```
 
 1. The model **never** receives a graph dump. It reaches the catalog only through read-only tools.
@@ -443,25 +418,14 @@ bcrypt-hashed.
 
 ### 🏢 SSO — real OIDC, multi-tenant
 
-Each account brings its own identity provider, routed by email domain.
+Each account brings its own identity provider, routed by email domain:
 
-```mermaid
-sequenceDiagram
-    participant U as 👤 User
-    participant A as 🗺️ Cartograph
-    participant I as 🏢 Tenant IdP
-
-    U->>A: POST /auth/sso/start { email }
-    A->>A: route domain → SsoConnection
-    A-->>U: { sso: true, redirectUrl }
-    U->>I: full-page redirect (Auth Code + PKCE)
-    I-->>U: redirect back with code
-    U->>A: GET /auth/sso/callback?code=…
-    A->>I: exchange code (client secret, decrypted)
-    I-->>A: id_token
-    A->>A: verify sig / iss / aud / nonce → JIT provision or link
-    A-->>U: session token, same as password login ✅
-```
+1. `POST /auth/sso/start` with an email → the domain is routed to its account's connection, and the
+   response carries a `redirectUrl`.
+2. Full-page redirect to the tenant's IdP (Authorization Code + PKCE).
+3. `GET /auth/sso/callback` exchanges the code, verifies signature / issuer / audience / nonce, then
+   JIT-provisions or links the user.
+4. A session token is minted — exactly as password login does.
 
 > [!NOTE]
 > `POST /auth/sso/start` returns the **same response shape** whether a domain has SSO configured, has
@@ -511,39 +475,39 @@ a payload that would break a client can't ship. 🚧
 
 | Suite | Covers |
 |---|---|
-| 📜 `contract.e2e-spec.ts` | Read API wire shapes + integrity rules against live responses |
-| 📥 `ingest.e2e-spec.ts` | Both `/v1` gates, byte-stable baselines, PR vs. default-branch semantics |
-| 🔑 `auth` / `sso.e2e-spec.ts` | Session lifecycle; full OIDC round trip against a mock IdP |
-| 🤖 `ask-llm` / `catalog-tools.e2e-spec.ts` | The tool loop and evidence ledger — the "never invents" guarantee |
-| 🔐 `llm-keys` / `llm-providers.e2e-spec.ts` | Key storage, verification, and each adapter's wire shape |
-| 🧰 `secret-box` / `error-body.e2e-spec.ts` | AES-256-GCM round trip; the `{ error }` normalisation |
+| `contract.e2e-spec.ts` | Read API wire shapes + integrity rules against live responses |
+| `ingest.e2e-spec.ts` | Both `/v1` gates, byte-stable baselines, PR vs. default-branch semantics |
+| `auth` / `sso.e2e-spec.ts` | Session lifecycle; full OIDC round trip against a mock IdP |
+| `ask-llm` / `catalog-tools.e2e-spec.ts` | The tool loop and evidence ledger — the "never invents" guarantee |
+| `llm-keys` / `llm-providers.e2e-spec.ts` | Key storage, verification, and each adapter's wire shape |
+| `secret-box` / `error-body.e2e-spec.ts` | AES-256-GCM round trip; the `{ error }` normalisation |
 
 ---
 
 ## 🗂️ Project layout
 
 ```
-📁 prisma/
+prisma/
    schema.prisma           # the data model (see CLAUDE.md §4)
    migrations/             # ordered, committed alongside schema changes
    seed.ts                 # demo account, login, API key + a small demo fleet
-📁 src/
+src/
    main.ts                 # bootstrap: global prefix, raw body, validation, error filter, CORS
-   📁 common/              # wire types, enums, query DTOs, integrity checks, error filter, crypto
-   📁 auth/                # login / me / logout, global AuthGuard, @Public()
-      📁 sso/              # OIDC: discovery + PKCE client, JIT/link/reject, secret encryption
-   📁 ingest/              # 🤖 the /v1 control plane
+   common/              # wire types, enums, query DTOs, integrity checks, error filter, crypto
+   auth/                # login / me / logout, global AuthGuard, @Public()
+      sso/              # OIDC: discovery + PKCE client, JIT/link/reject, secret encryption
+   ingest/              # 🤖 the /v1 control plane
       ingest.service.ts    #    gates, baseline write, orchestration
       graphdiff.ts         #    ✨ pure — semantic diff over two service bodies
       resolve.ts           #    raw target name → known service | external
       project.ts           #    ✨ pure — baselines → catalog (graph + contracts)
       markdown.ts          #    the PR comment
-   📁 graph/ contracts/ commits/    # 👤 the read endpoints
-   📁 ask/                 # the tool loop, catalog tools, evidence ledger, prompt
-   📁 llm/                 # provider interface, Anthropic + OpenAI adapters, model registry
-   📁 settings/            # LLM provider key storage
-   📁 health/ prisma/
-📁 test/                   # e2e suites + mock IdP / stub provider fixtures
+   graph/ contracts/ commits/    # 👤 the read endpoints
+   ask/                 # the tool loop, catalog tools, evidence ledger, prompt
+   llm/                 # provider interface, Anthropic + OpenAI adapters, model registry
+   settings/            # LLM provider key storage
+   health/ prisma/
+test/                   # e2e suites + mock IdP / stub provider fixtures
 ```
 
 > [!TIP]
@@ -584,13 +548,13 @@ rendering, password + OIDC SSO authentication, per-account LLM key management, a
 
 **Known gaps**, stated plainly 🚧:
 
-| | Gap | Detail |
-|:--:|---|---|
-| 🕰️ | `GET /commits` returns `[]` | Endpoint, storage and diff engine all exist; the scanner doesn't yet send per-commit metadata. Not a bug — a missing upstream feed. |
-| 🧪 | Ask is untested against a live provider | Tool loop, evidence ledger and both adapters are covered against stubs and pinned wire shapes, but the first real Anthropic/OpenAI call is still pending. |
-| 🗄️ | `databases_used` / `config_dependencies` | Accepted and stored, but not yet projected into the catalog. |
-| 💳 | Quota is a placeholder integer | No billing integration behind it. |
-| 👥 | No role model on `User` | Every member of an account can write that account's provider keys. |
+| Gap | Detail |
+|---|---|
+| `GET /commits` returns `[]` | Endpoint, storage and diff engine all exist; the scanner doesn't yet send per-commit metadata. Not a bug — a missing upstream feed. |
+| Ask is untested against a live provider | Tool loop, evidence ledger and both adapters are covered against stubs and pinned wire shapes, but the first real Anthropic/OpenAI call is still pending. |
+| `databases_used` / `config_dependencies` | Accepted and stored, but not yet projected into the catalog. |
+| Quota is a placeholder integer | No billing integration behind it. |
+| No role model on `User` | Every member of an account can write that account's provider keys. |
 
 ---
 
