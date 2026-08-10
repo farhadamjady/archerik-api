@@ -72,18 +72,12 @@ quietly promoting the third into the first so the output looks tidier.
 
 ## ⚙️ How it works
 
-```mermaid
-flowchart TD
-    S[Scanner in CI] -->|POST /v1/ingest — API key| G
-    G[Gate: entitlement + limits] --> B[Byte-compare against baseline]
-    B --> D[Semantic diff]
-    D --> R[Resolve targets]
-    R --> W[Write baseline — default branch only]
-    W --> P[Re-project catalog]
-    P --> DB[(PostgreSQL)]
-    D -.->|PR comment markdown| S
-    U[Web UI] -->|GET /api/v1/graph — session token| P
-```
+A scan arrives at `POST /v1/ingest`, one service per request. The backend checks the account's
+entitlement and service limit, byte-compares the body against that service's stored baseline (a
+match ends the request there), computes a semantic diff, resolves each dependency's raw target name
+to a known service or `external`, and renders the PR-comment markdown. On a **default-branch** scan
+only, it then writes the new baseline and re-projects the account's whole fleet into the catalog
+that `GET /api/v1/graph` serves.
 
 ### 🔐 Two API surfaces, deliberately kept apart
 
@@ -377,8 +371,6 @@ spends no tokens, so a typo surfaces at save time rather than as a mysterious fa
 
 ### 🔒 Answers can't cite something that isn't there
 
-This is enforced **structurally**, not by asking the model nicely:
-
 ```mermaid
 flowchart LR
     Q[Question] --> M[Model]
@@ -489,28 +481,40 @@ a payload that would break a client can't ship. 🚧
 ## 🗂️ Project layout
 
 ```
+README.md                    # this file
+CLAUDE.md                    # architecture, storage rationale, the invariants (§6)
+.github/workflows/ci.yml     # lint, typecheck, build, migrate, seed, e2e
+docker-compose.yml           # local Postgres (+ optional Adminer)
+
 prisma/
-   schema.prisma           # the data model (see CLAUDE.md §4)
-   migrations/             # ordered, committed alongside schema changes
-   seed.ts                 # demo account, login, API key + a small demo fleet
+  schema.prisma              # the data model (see CLAUDE.md §4)
+  migrations/                # ordered, committed alongside schema changes
+  seed.ts                    # demo account, login, API key + a small demo fleet
+
 src/
-   main.ts                 # bootstrap: global prefix, raw body, validation, error filter, CORS
-   common/              # wire types, enums, query DTOs, integrity checks, error filter, crypto
-   auth/                # login / me / logout, global AuthGuard, @Public()
-      sso/              # OIDC: discovery + PKCE client, JIT/link/reject, secret encryption
-   ingest/              # 🤖 the /v1 control plane
-      ingest.service.ts    #    gates, baseline write, orchestration
-      graphdiff.ts         #    ✨ pure — semantic diff over two service bodies
-      resolve.ts           #    raw target name → known service | external
-      project.ts           #    ✨ pure — baselines → catalog (graph + contracts)
-      markdown.ts          #    the PR comment
-   graph/ contracts/ commits/    # 👤 the read endpoints
-   ask/                 # the tool loop, catalog tools, evidence ledger, prompt
-   llm/                 # provider interface, Anthropic + OpenAI adapters, model registry
-   settings/            # LLM provider key storage
-   health/ prisma/
-test/                   # e2e suites + mock IdP / stub provider fixtures
+  main.ts                    # bootstrap: prefix, raw body, validation, error filter, CORS
+  common/                    # wire types, enums, query DTOs, integrity checks, crypto
+  auth/                      # login / me / logout, global AuthGuard, @Public()
+    sso/                     # OIDC: discovery + PKCE client, JIT/link/reject, encryption
+  ingest/                    # the /v1 control plane
+    ingest.service.ts        #   gates, baseline write, orchestration
+    model.ts                 #   the ingest body + diff vocabulary
+    graphdiff.ts             #   pure — semantic diff over two service bodies
+    resolve.ts               #   raw target name -> known service | external
+    project.ts               #   pure — baselines -> catalog (graph + contracts)
+    markdown.ts              #   the PR comment
+  graph/ contracts/ commits/ # the read endpoints
+  ask/                       # the tool loop, catalog tools, evidence ledger, prompt
+  llm/                       # provider interface, Anthropic + OpenAI adapters, registry
+  settings/                  # LLM provider key storage
+  health/ prisma/
+
+test/                        # e2e suites + mock IdP / stub provider fixtures
 ```
+
+There is no `docs/` directory on purpose. The wire shapes are defined by the types that serve them
+(`src/common/types.ts`, `src/common/enums.ts`, `src/ingest/model.ts`) and pinned against live HTTP
+responses by the e2e suites, so there is no prose copy to drift out of date.
 
 > [!TIP]
 > **Four files carry most of the interesting logic:** `ingest.service.ts` (orchestration),
