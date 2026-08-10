@@ -1,22 +1,40 @@
 import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'crypto';
-import type * as Jose from 'jose';
+import { createSign, generateKeyPairSync, KeyObject, randomUUID } from 'crypto';
 import { encryptSecret } from '../src/auth/sso/sso-crypto';
-
-// `jose` (like `openid-client`, same maintainer) ships ESM-only, but ts-jest compiles this file to
-// CommonJS — a static `import` downlevels to `require()`, which throws on an ESM-only package. Same
-// fix as src/auth/sso/oidc-client.ts: hide the import behind `new Function` so it stays a genuine
-// native `import()` at runtime instead of being rewritten.
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-  specifier: string,
-) => Promise<typeof Jose>;
-const loadJose = (() => {
-  let modulePromise: Promise<typeof Jose> | undefined;
-  return () => (modulePromise ??= dynamicImport('jose'));
-})();
 
 export const MOCK_ISSUER = 'https://mock-idp.test';
 const KID = 'test-key';
+
+/**
+ * RS256 signing with Node's built-in crypto rather than `jose`.
+ *
+ * `jose` is ESM-only, so importing it from this CommonJS-compiled fixture needed the same
+ * `new Function('specifier', 'return import(specifier)')` trick as src/auth/sso/oidc-client.ts —
+ * and that turned out to break the suite. V8 caches `new Function` compilations by source text, so
+ * two call sites with byte-identical source share one compiled function, bound to the realm that
+ * compiled it FIRST. Under Jest each test file gets its own realm, which is torn down when the file
+ * finishes. Once any earlier suite had booted the app (compiling oidc-client's copy), this file's
+ * identical `new Function` resolved to that dead realm and every SSO test failed with "Test
+ * environment has been torn down" — with a stack that blamed oidc-client.ts for a call made here.
+ *
+ * It only reproduced when sso.e2e-spec did NOT run first, so a warm Jest cache (which reorders
+ * previously-failing suites to the front) hid it locally while CI failed every time.
+ *
+ * Node's crypto signs RS256 natively and is a plain CommonJS built-in, so there is no dynamic
+ * import here at all — the class of bug is gone rather than worked around.
+ */
+const b64url = (input: string | Buffer): string => Buffer.from(input).toString('base64url');
+
+function signRs256(claims: Record<string, unknown>, privateKey: KeyObject): string {
+  const header = { alg: 'RS256', typ: 'JWT', kid: KID };
+  const now = Math.floor(Date.now() / 1000);
+  // Caller claims first, then the envelope this mock IdP always controls — mirroring the previous
+  // jose chain, where .setIssuer()/.setIssuedAt()/.setExpirationTime() overrode the constructor.
+  const payload = { ...claims, iss: MOCK_ISSUER, iat: now, exp: now + 300 };
+  const signingInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
+  const signature = createSign('RSA-SHA256').update(signingInput).sign(privateKey);
+  return `${signingInput}.${signature.toString('base64url')}`;
+}
 
 export interface MockIdp {
   /** Signs an ID token as the mock IdP. Callers set `aud`/`sub`/`nonce`/email claims as needed. */
@@ -42,9 +60,9 @@ export interface MockIdp {
  * in whatever realm its code is executing in.
  */
 export async function setupMockIdp(): Promise<MockIdp> {
-  const jose = await loadJose();
-  const { publicKey, privateKey } = await jose.generateKeyPair('RS256');
-  const jwk = await jose.exportJWK(publicKey);
+  // 2048-bit RSA, matching what jose.generateKeyPair('RS256') produced.
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: 'jwk' }) as Record<string, unknown>;
   Object.assign(jwk, { kid: KID, alg: 'RS256', use: 'sig' });
 
   const discoveryDocument = {
@@ -95,12 +113,7 @@ export async function setupMockIdp(): Promise<MockIdp> {
 
   return {
     async signIdToken(claims: Record<string, unknown>): Promise<string> {
-      return new jose.SignJWT(claims)
-        .setProtectedHeader({ alg: 'RS256', kid: KID })
-        .setIssuedAt()
-        .setIssuer(MOCK_ISSUER)
-        .setExpirationTime('5m')
-        .sign(privateKey);
+      return signRs256(claims, privateKey);
     },
     mockTokenEndpoint(idToken: string): void {
       nextIdToken = idToken;
