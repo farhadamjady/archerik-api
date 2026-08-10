@@ -1,9 +1,4 @@
-import {
-  Catalog,
-  CATALOG_TOOLS,
-  executeCatalogTool,
-  ToolContext,
-} from '../src/ask/catalog-tools';
+import { Catalog, CATALOG_TOOLS, executeCatalogTool, ToolContext } from '../src/ask/catalog-tools';
 import { buildNote, EvidenceLedger } from '../src/ask/evidence';
 import { EdgeDto, EndpointContractDto, NodeDto, TopicContractDto } from '../src/common/types';
 
@@ -25,7 +20,12 @@ const node = (over: Partial<NodeDto> & { id: string }): NodeDto => ({
 
 const CATALOG: Catalog = {
   nodes: [
-    node({ id: 'payment-service', repo: 'payment-service', host: 'payment-service', language: 'Java' }),
+    node({
+      id: 'payment-service',
+      repo: 'payment-service',
+      host: 'payment-service',
+      language: 'Java',
+    }),
     node({ id: 'checkout', name: 'CheckoutOrchestrator', repo: 'checkout', host: 'checkout' }),
     node({ id: 'refund', name: 'RefundService', repo: 'refund', host: 'refund' }),
     node({ id: 'stripe', name: 'StripeAPI', type: 'external', host: 'api.stripe.com' }),
@@ -123,7 +123,9 @@ describe('catalog tools', () => {
     }
     // Every executable tool is advertised, and every advertised tool executes.
     for (const tool of CATALOG_TOOLS) {
-      expect(run(tool.name, {}, context())).not.toMatchObject({ error: expect.stringContaining('unknown tool') });
+      expect(run(tool.name, {}, context())).not.toMatchObject({
+        error: expect.stringContaining('unknown tool'),
+      });
     }
   });
 
@@ -188,8 +190,14 @@ describe('catalog tools', () => {
     const ctx = context();
     const out = run('get_topic', { topic: 'PaymentAuthorized' }, ctx) as any;
 
-    expect(out.producer).toMatchObject({ name: 'payment-service', evidence_id: expect.any(String) });
-    expect(out.consumers.map((c: any) => c.name)).toEqual(['CheckoutOrchestrator', 'RefundService']);
+    expect(out.producer).toMatchObject({
+      name: 'payment-service',
+      evidence_id: expect.any(String),
+    });
+    expect(out.consumers.map((c: any) => c.name)).toEqual([
+      'CheckoutOrchestrator',
+      'RefundService',
+    ]);
     expect(ctx.ledger.size).toBe(3); // producer + 2 consumers
 
     const orphan = run('get_topic', { topic: 'OrphanEvent' }, context()) as any;
@@ -228,7 +236,11 @@ describe('catalog tools', () => {
         error: 'service is required',
       });
       expect(
-        run('get_service_dependencies', { service: 'payment-service', direction: 'sideways' }, context()),
+        run(
+          'get_service_dependencies',
+          { service: 'payment-service', direction: 'sideways' },
+          context(),
+        ),
       ).toMatchObject({ error: expect.stringContaining('direction must be one of') });
       expect(run('get_topic', {}, context())).toMatchObject({ error: 'topic is required' });
     });

@@ -11,11 +11,10 @@ export type Confidence = (typeof CONFIDENCE)[number];
 export const PROTOCOL = ['rest', 'kafka', 'grpc', 'websocket', 'unknown'] as const;
 export type Protocol = (typeof PROTOCOL)[number];
 
-// `deployment` = a real deployed host that couldn't be linked to a scanned code service. RESERVED:
-// its only producer was the deploy-identity map, which was retired in the catalog pivot, so the
-// backend does NOT currently emit deployment nodes. Kept in the enum because the UI still validates
-// NODE_TYPE strictly against this exact set — dropping it here would diverge from the UI contract.
-export const NODE_TYPE = ['service', 'external', 'unknown', 'deployment'] as const;
+// `service` = a scanned code service · `external` = a resolvable third-party host (api.stripe.com)
+// · `unknown` = a call target that could not be tied to either. An `unknown` node is never dropped:
+// it is emitted with a `note` explaining why it stayed unresolved (CLAUDE.md §6).
+export const NODE_TYPE = ['service', 'external', 'unknown'] as const;
 export type NodeType = (typeof NODE_TYPE)[number];
 
 /**

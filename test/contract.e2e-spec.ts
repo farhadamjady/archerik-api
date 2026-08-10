@@ -90,15 +90,30 @@ describe('P0 API contract', () => {
       expect(node).not.toHaveProperty('deg');
       expect(node).not.toHaveProperty('inDeg');
     }
-    // Every service node carries explicit repo + host (BACKEND-HANDOFF.md §3).
+    // Every service node carries explicit repo + host (API-CONTRACT.md §1).
     const services = res.body.nodes.filter((n: GraphNode) => n.type === 'service');
     expect(services.length).toBeGreaterThan(0); // the filter matched something
     for (const node of services) {
       expect(typeof node.repo).toBe('string');
       expect(typeof node.host).toBe('string');
     }
-    // The filter actually filters: every service in the subset belongs to the requested repo.
-    for (const node of services) expect(node.repo).toBe(REPO);
+    // The filter actually filters — but "filter" here means FOCUS, not "drop everything else".
+    // filterGraph keeps the repo's services plus their 1-hop neighbours, which is not a nicety: an
+    // edge from a focused service to a service in another repo has to have BOTH endpoints present,
+    // or the payload fails validateGraph's edge->node referential check (and the UI's) below.
+    // So: the requested repo must be represented, and every other service must be a neighbour.
+    const focused = services.filter((n: GraphNode) => n.repo === REPO);
+    expect(focused.length).toBeGreaterThan(0);
+    const focusedIds = new Set(focused.map((n: GraphNode) => n.id));
+    for (const node of services) {
+      if (focusedIds.has(node.id)) continue;
+      const touchesFocus = res.body.edges.some(
+        (e: GraphEdge) =>
+          (e.from === node.id && focusedIds.has(e.to)) ||
+          (e.to === node.id && focusedIds.has(e.from)),
+      );
+      expect(touchesFocus).toBe(true);
+    }
     expect(validateGraph(res.body)).toEqual([]);
   });
 
@@ -170,7 +185,7 @@ describe('P0 API contract', () => {
   });
 
   // Ask now answers via the account's own provider key, so with none configured the contract is a
-  // 409 (BACKEND-LLM-KEYS.md §4). The grounded-answer behaviour — the tool loop, the evidence
+  // 409 (API-CONTRACT.md §4). The grounded-answer behaviour — the tool loop, the evidence
   // ledger, error mapping — is covered in ask-llm.e2e-spec.ts against a scripted provider, since
   // asserting it here would mean either a real API call or a stub this suite has no business owning.
   it('POST /ask — 409 with a user-facing error when no provider key is configured', async () => {

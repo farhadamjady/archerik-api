@@ -9,7 +9,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   // UI routes live under /api/v1 (API-CONTRACT.md). The extractor's /v1/* control-plane routes
-  // (BACKEND_CONTRACT.md) are excluded so they stay at the base path the CLI expects.
+  // (INGEST-CONTRACT.md) are excluded so they stay at the base path the CLI expects.
   app.setGlobalPrefix('api/v1', {
     exclude: [
       { path: 'v1/auth/validate', method: RequestMethod.POST },

@@ -1,14 +1,21 @@
-# Cartograph UI ↔ Backend API Contract
+# Read API Contract (`/api/v1`) — backend → UI
 
-APIs the UI needs from the backend microservice. Shapes mirror what the UI already binds to
-(`buildModel`, `buildContracts`, `buildCommits`, `answerQuestion` in `Architecture Graph.dc.html`) so
-wiring is a drop-in replacement of the mock builders.
+The wire contract for the **read** side of the service: everything a client needs to render the
+catalog, ask questions about it, and manage account settings. This is the authoritative document for
+these shapes — where it disagrees with any other file, it wins, because clients validate against it
+and fail loudly.
+
+The **write** side that scanners submit to is a different base path, a different credential, and a
+different document — see [`INGEST-CONTRACT.md`](./INGEST-CONTRACT.md).
+
+Sections are numbered and referenced from code comments; keep the numbering stable.
 
 Conventions:
 
 - Base path `/api/v1`, JSON everywhere.
 - Enums are lowercase exact strings: `confidence: confirmed|likely|uncertain`,
-  `protocol: rest|kafka`, node `type: service|external|unknown`.
+  `protocol: rest|kafka|grpc|websocket|unknown`, node `type: service|external|unknown`. Edge/endpoint
+  `method` is the deliberate exception — a **free display string**, never validated.
 - **Invariant (do not violate on the backend either):** unresolved/uncertain things are never
   dropped — an unresolvable call target still becomes a node with `type: "unknown"` and a
   human-readable `note` explaining *why* it couldn't be resolved.
@@ -32,22 +39,29 @@ Conventions:
   ingested for that account, across all repos), projected into one current-head graph per
   `(account, branch)`. `repo` and `service` are **optional filters** that narrow that graph, not
   required keys. Each service node carries its `repo` so the UI can group/filter client-side too.
-- **Executable reference:** `dev-server.mjs` in this repo implements this entire contract over the
-  demo dataset (`node dev-server.mjs`, endpoints on `http://localhost:8787/api/v1`). When in doubt
-  about a shape, diff against what it returns.
+- **Executable reference:** run the backend against the seed (`npx prisma db seed && npm run
+  start:dev`) and diff against what it actually returns. `test/contract.e2e-spec.ts` asserts these
+  shapes against live HTTP responses, so the suite is the machine-checked version of this document.
 
 ---
 
-## P0 — required to replace the mock data
+## P0 — the catalog
 
 ### 1. `GET /api/v1/graph` (optional `?repo=…&service=…&branch=main`)
 
 The whole account graph in one payload (current scale ~92 nodes / ~189 edges — no pagination
 needed; the UI lays out and filters client-side). **All query params are optional** — with none, you
-get everything the account owns. `repo` subsets to one repository; `service` focuses one service and
-its immediate neighbours; `branch` defaults to `main`. The envelope's `repo` echoes the applied
-filter, or is `null` when the whole account is returned. Each `service` node includes a `repo` field
-(null for `external`/`unknown` nodes).
+get everything the account owns. `repo` focuses one repository; `service` focuses one service;
+`branch` defaults to `main`. The envelope's `repo` echoes the applied filter, or is `null` when the
+whole account is returned. Each `service` node includes a `repo` field (null for `external`/`unknown`
+nodes).
+
+**A filter focuses, it does not truncate.** Either filter returns the selected services **plus their
+immediate (1-hop) neighbours** and the edges between them, so a repo is shown in context rather than
+in isolation. That also keeps the payload internally valid: an edge from a focused service to one in
+another repo needs both endpoints present, or the response would violate the edge→node rule above.
+So a `?repo=` response can legitimately contain service nodes whose `repo` is something else — they
+are the things the focused repo talks to.
 
 A **fresh account with no scans yet** returns `200` with an **empty graph**
 (`{ "repo": null, "branch": "main", "scannedAt": null, "teams": [], "nodes": [], "edges": [] }`) —
@@ -175,7 +189,7 @@ ends up verbatim in the UI and in the generated PR comment.
 
 ---
 
-## P1 — fully wired in the UI (dev-server.mjs stands in until the real backend exists)
+## P1 — implemented
 
 ### 4. `POST /api/v1/ask`
 
@@ -245,9 +259,8 @@ backend serves carries one, since none can answer without a key.
   feeds the sidebar user chip.
 - `POST /api/v1/auth/logout` — invalidate the token server-side; response body ignored
   (best-effort fire-and-forget from the UI).
-- **SSO (P1, real OIDC — supersedes the old bare-link stub; BREAKING for the UI, needs a small
-  change)**: SSO is multi-tenant (each account brings its own IdP) and routed by email domain, so
-  it's now a two-step flow instead of a bare link:
+- **SSO (real OIDC)**: SSO is multi-tenant — each account brings its own IdP, routed by email
+  domain — so it is a two-step flow rather than a single link:
   1. `POST /api/v1/auth/sso/start` — request `{ "email": "..." }`.
      `200` → `{ "sso": true, "redirectUrl": "..." }` if the email's domain has SSO configured — the
      UI does a full-page navigation (`location.href = redirectUrl`) to start the IdP dance.
@@ -299,9 +312,9 @@ Every non-2xx body carries an `error` string, which the UI renders verbatim on t
 
 ---
 
-## P2 — blocked on product requirements (Settings page is a stub)
+## P2 — not implemented
 
-Provisional, don't build until the Settings scope is decided:
+Sketched, not built. Shapes here are provisional and may change; don't depend on them:
 
 - `GET/PUT /api/v1/settings/scan-scope` — which repos/paths are scanned
 - `GET/POST/DELETE /api/v1/settings/repositories` — repository connections

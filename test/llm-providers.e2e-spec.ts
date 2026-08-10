@@ -228,9 +228,9 @@ describe('AnthropicProvider — wire shape', () => {
     };
     const provider = new AnthropicProvider('sk-ant-test', 5_000);
 
-    await expect(provider.complete({ ...CONVERSATION, model: 'claude-opus-5' })).rejects.toMatchObject(
-      { name: 'LlmProviderError', kind: 'refused' },
-    );
+    await expect(
+      provider.complete({ ...CONVERSATION, model: 'claude-opus-5' }),
+    ).rejects.toMatchObject({ name: 'LlmProviderError', kind: 'refused' });
   });
 
   it('classifies a 401 as a rejected key, without echoing the upstream body', async () => {

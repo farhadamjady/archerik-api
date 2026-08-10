@@ -26,20 +26,20 @@ export interface NodeDto {
   /** Always present, including "external" / "unknown" for those node types. */
   team: string;
   type: NodeType;
-  /** Human-readable explanation, required for unknown AND deployment nodes; null otherwise. */
+  /** Human-readable explanation of why the target stayed unresolved. Required for `unknown` nodes; null otherwise. */
   note: string | null;
   /** Primary implementation language, canonical casing (e.g. "Java", "Kotlin"); null when not scanned/reported. */
   language?: string | null;
   /**
    * Repository slug — the catalog's primary label for a service box and the `org/<repo>` header
-   * (e.g. "payment-service"). Sent for service/external nodes; null for unknown/deployment. This is
+   * (e.g. "payment-service"). Sent for service/external nodes; null for unknown nodes. This is
    * the per-service repo slug, NOT the owning system/org (that is GraphResponse.org).
    */
   repo?: string | null;
   /**
    * The host a caller uses to reach this node: the service slug for internal services, the real
-   * third-party host for externals (e.g. "api.stripe.com"), the proven deploy host for deployment
-   * nodes. null when genuinely unknown (unresolved runtime target).
+   * third-party host for externals (e.g. "api.stripe.com"). null when genuinely unknown (an
+   * unresolved runtime target).
    */
   host?: string | null;
 }
@@ -76,7 +76,7 @@ export interface GraphResponse {
 /**
  * One node of a request/response/message schema. Recursive: a field whose type is a DTO carries its
  * children in `nested`, up to the extractor's truncation boundary. The wire shape mirrors the
- * extractor's `Schema` (BACKEND_CONTRACT.md §4a) — the backend passes it through VERBATIM (never
+ * extractor's `Schema` (INGEST-CONTRACT.md §4a) — the backend passes it through VERBATIM (never
  * flattens, never synthesizes), so the UI renders nested tables, enum/constraint chips, and
  * collapsed-truncation nodes directly. Only non-empty keys are emitted (`name`/`type`/`nullable`
  * always present; `note` kept for provenance).

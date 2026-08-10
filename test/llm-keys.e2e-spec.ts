@@ -6,9 +6,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, login } from './e2e-utils';
 
 /**
- * Settings → LLM tab (BACKEND-LLM-KEYS.md §1-3).
+ * Settings → LLM tab (API-CONTRACT.md §7).
  *
- * Mirrors the behaviour the spec pins against the UI's executable reference (dev-server.mjs):
+ * Mirrors the behaviour API-CONTRACT.md §7 pins:
  * GET returns configured/last4 only; PUT returns 422 (unknown provider) / 400 (empty key) and never
  * echoes the key; DELETE is 204 and idempotent.
  */
@@ -24,7 +24,9 @@ describe('Settings → LLM provider keys', () => {
   let token: string;
 
   const auth = (): request.Test =>
-    request(app.getHttpServer()).get('/api/v1/settings/llm-keys').set('Authorization', `Bearer ${token}`);
+    request(app.getHttpServer())
+      .get('/api/v1/settings/llm-keys')
+      .set('Authorization', `Bearer ${token}`);
 
   beforeAll(async () => {
     // These tests use fake keys and must not reach the network. The verification path itself is
@@ -179,7 +181,7 @@ describe('Settings → LLM provider keys', () => {
 });
 
 /**
- * Key verification at save time (BACKEND-LLM-KEYS.md §2). Runs against a stubbed LlmClientFactory,
+ * Key verification at save time (API-CONTRACT.md §7). Runs against a stubbed LlmClientFactory,
  * so it exercises the real service logic with no network access and no real provider key.
  */
 describe('Settings → LLM key verification', () => {

@@ -5,7 +5,7 @@ import { PutLlmKeyDto } from './dto/put-llm-key.dto';
 import { LlmKeysService, LlmKeyStatus } from './llm-keys.service';
 
 /**
- * Settings → LLM tab (BACKEND-LLM-KEYS.md §1-3).
+ * Settings → LLM tab (API-CONTRACT.md §7).
  *
  * Account-scoped: the account comes from the session, never the request, so every member of an
  * account shares one set of provider keys. Writes are not gated to admins — there is no role model

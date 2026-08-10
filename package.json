@@ -1,16 +1,38 @@
 {
   "name": "cartograph-backend",
   "version": "0.1.0",
-  "description": "Cartograph — engineering knowledge graph backend (P0 API over seeded demo dataset)",
-  "license": "UNLICENSED",
+  "description": "Cartograph — a service-catalog backend for Spring Boot fleets: ingests static-analysis scans, serves the catalog, and answers grounded questions about it",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/farhadamjady/service-discovery-backend-chore.git"
+  },
+  "bugs": {
+    "url": "https://github.com/farhadamjady/service-discovery-backend-chore/issues"
+  },
+  "keywords": [
+    "service-catalog",
+    "static-analysis",
+    "spring-boot",
+    "microservices",
+    "developer-portal",
+    "nestjs",
+    "prisma"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
+    "lint:check": "eslint \"{src,test}/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "test": "jest",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "npm run test:e2e",
     "test:e2e": "node --experimental-vm-modules ./node_modules/.bin/jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

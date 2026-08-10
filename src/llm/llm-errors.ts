@@ -11,7 +11,7 @@ import { LlmProviderId, PROVIDER_LABELS } from './providers';
  *    and every string here is rendered verbatim in the user's Ask bubble. The messages below are
  *    written by us; the SDK's own message is logged server-side and never returned.
  * 2. **Never fabricate an answer.** Every failure becomes a 4xx/5xx with an `error` string
- *    (BACKEND-LLM-KEYS.md §4), never a plausible-looking response.
+ *    (API-CONTRACT.md §4), never a plausible-looking response.
  */
 
 /**
@@ -48,7 +48,7 @@ export function classifyProviderError(err: unknown, provider: LlmProviderId): Ll
   return new LlmProviderError('unavailable', provider, `the request to ${label} failed`);
 }
 
-/** Maps a classified failure onto the status codes in BACKEND-LLM-KEYS.md. */
+/** Maps a classified failure onto the status codes in API-CONTRACT.md §4. */
 export function toHttpException(err: LlmProviderError): HttpException {
   const body = { error: err.message };
   const status: Record<LlmFailureKind, HttpStatus> = {

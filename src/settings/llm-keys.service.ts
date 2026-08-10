@@ -128,7 +128,7 @@ export class LlmKeysService {
   }
 
   /**
-   * Checks the key against the provider before storing it (BACKEND-LLM-KEYS.md §2, "optional but
+   * Checks the key against the provider before storing it (API-CONTRACT.md §7, "optional but
    * preferred"). Uses an auth-only endpoint, so verification costs no tokens.
    *
    * Fails closed on every error, including transient ones. Storing a key we couldn't verify just

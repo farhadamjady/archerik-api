@@ -22,10 +22,10 @@ export function validateGraph(graph: GraphResponse): string[] {
     if (!node.team) errors.push(`node ${node.id}: missing team`);
     else if (!teamIds.has(node.team))
       errors.push(`node ${node.id}: team "${node.team}" not in teams[]`);
-    // unknown + deployment nodes must explain themselves (why unresolved / which identity fact
-    // named this host) — the "never hide uncertainty" invariant, enforced the same for both.
-    if ((node.type === 'unknown' || node.type === 'deployment') && !node.note) {
-      errors.push(`node ${node.id}: ${node.type} node must carry a note`);
+    // An unknown node must explain why it stayed unresolved — the "never hide uncertainty"
+    // invariant (CLAUDE.md §6), enforced here so an unexplained node can't reach the UI.
+    if (node.type === 'unknown' && !node.note) {
+      errors.push(`node ${node.id}: unknown node must carry a note`);
     }
   }
 

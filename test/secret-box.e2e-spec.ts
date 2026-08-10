@@ -1,5 +1,8 @@
 import { decryptSecret, encryptSecret } from '../src/common/secret-box';
-import { decryptSecret as decryptSso, encryptSecret as encryptSso } from '../src/auth/sso/sso-crypto';
+import {
+  decryptSecret as decryptSso,
+  encryptSecret as encryptSso,
+} from '../src/auth/sso/sso-crypto';
 
 /**
  * Pure unit tests — no app, no DB. They live under the e2e runner because that is the only

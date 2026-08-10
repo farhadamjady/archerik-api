@@ -1,5 +1,5 @@
 // Renders the PR-comment markdown returned in IngestResponse.markdown. The CI posts this verbatim;
-// the server never touches GitHub. Format mirrors the reference fixture (BACKEND_CONTRACT.md §6).
+// the server never touches GitHub. Format mirrors the reference fixture (INGEST-CONTRACT.md §6).
 
 import { CategoryDiff, Endpoint, GraphDiff, KafkaEdge, OutboundDependency } from './model';
 

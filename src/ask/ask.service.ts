@@ -46,7 +46,7 @@ const MAX_TOKENS = 8000;
  * unexamined.
  *
  * Failures never become answers. Every provider problem surfaces as a 4xx/5xx with an `error`
- * string the UI renders in its "no answer" bubble (BACKEND-LLM-KEYS.md §4).
+ * string the UI renders in its "no answer" bubble (API-CONTRACT.md §4).
  */
 @Injectable()
 export class AskService {

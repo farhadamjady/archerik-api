@@ -93,9 +93,10 @@ describe('POST /ask — grounded answers via a provider', () => {
         provider: 'anthropic',
         keyEnc: Buffer.from(
           // Encrypt through the app so the fixture matches whatever the store expects.
-          (
-            await import('../src/common/secret-box')
-          ).encryptSecret(ANTHROPIC_KEY, 'LLM_ENCRYPTION_KEY'),
+          (await import('../src/common/secret-box')).encryptSecret(
+            ANTHROPIC_KEY,
+            'LLM_ENCRYPTION_KEY',
+          ),
         ),
         last4: 'a1b2',
       },
@@ -109,7 +110,9 @@ describe('POST /ask — grounded answers via a provider', () => {
   });
 
   /** Answers immediately, no tools. */
-  const answerOnce = (text: string): Script => () => ({ text, toolCalls: [] });
+  const answerOnce =
+    (text: string): Script =>
+    () => ({ text, toolCalls: [] });
 
   it('409s with the spec wording when the provider has no key', async () => {
     await prisma.llmProviderKey.deleteMany({});
@@ -217,7 +220,11 @@ describe('POST /ask — grounded answers via a provider', () => {
         ? {
             text: '',
             toolCalls: [
-              { id: 'call_1', name: 'get_service_dependencies', input: { service: 'nope-service' } },
+              {
+                id: 'call_1',
+                name: 'get_service_dependencies',
+                input: { service: 'nope-service' },
+              },
             ],
           }
         : { text: 'That service is not in the catalog.', toolCalls: [] };

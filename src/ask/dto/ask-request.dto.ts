@@ -1,6 +1,6 @@
 import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
-/** POST /api/v1/ask body (BACKEND-HANDOFF.md §5). `model` is an id the user picked from /models. */
+/** POST /api/v1/ask body (API-CONTRACT.md §4). `model` is an id the user picked from /models. */
 export class AskRequestDto {
   @IsString()
   @MinLength(1)

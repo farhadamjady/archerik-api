@@ -380,7 +380,7 @@ export function projectReadModel(services: ParsedService[]): {
   for (const [topic, sides] of topics) {
     const producer = sides.producers[0];
     const schemaSource = producer?.edge.schema ?? sides.consumers[0]?.edge.schema;
-    // Invariant (CLAUDE.md §3.3 / validateContracts): a topic with no producer in scan scope is
+    // Invariant (CLAUDE.md §6 / validateContracts): a topic with no producer in scan scope is
     // "uncertain" — a consumer's own @KafkaListener confidence must NOT promote the topic, or the
     // UI rejects the contracts payload (producer null but confidence != uncertain).
     const confidence: Confidence = producer ? asConfidence(producer.edge.confidence) : 'uncertain';

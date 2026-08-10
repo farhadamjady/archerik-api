@@ -7,7 +7,7 @@ import { IngestController } from './ingest.controller';
 import { IngestService } from './ingest.service';
 
 /**
- * The extractor-facing control plane (BACKEND_CONTRACT.md). /v1/* routes gated by an API key,
+ * The extractor-facing control plane (INGEST-CONTRACT.md). /v1/* routes gated by an API key,
  * separate from the UI's session-token API. Routes are excluded from the api/v1 global prefix in
  * main.ts and marked @Public() so the global session guard defers to ApiKeyGuard.
  */
