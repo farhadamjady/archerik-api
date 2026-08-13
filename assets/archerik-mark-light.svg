@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" fill="none" role="img" aria-label="Archerik">
+  <title>Archerik</title>
+  <!--
+    Archerik primary mark — light-ground ramp.
+    Same geometry as archerik-mark.svg with the value order inverted: the body
+    becomes the darkest element so it still holds the centre against white.
+
+      body    oklch(0.42 0.10 210)  #005A6B
+      legs    oklch(0.58 0.13 210)  #008DA4
+      bow     oklch(0.52 0.11 210)  #00798C
+      string  oklch(0.72 0.06 210)  #77AFB9
+  -->
+  <path d="M32 6 L32 58" stroke="#77AFB9" stroke-width="2" fill="none"/>
+  <path d="M32 6 A26 26 0 0 1 32 58" stroke="#00798C" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M28 24 A12 12 0 0 0 20 14 M28 32 A14 14 0 0 0 18 32 M28 40 A12 12 0 0 1 20 50" stroke="#008DA4" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  <path d="M40 24 A14 14 0 0 1 52 16 M40 40 A14 14 0 0 0 52 48" stroke="#008DA4" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  <circle cx="34" cy="32" r="9.5" fill="#005A6B"/>
+  <path d="M44 32 L58 32" stroke="#005A6B" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+</svg>

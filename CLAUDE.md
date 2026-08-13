@@ -1,4 +1,4 @@
-# Cartograph Backend — contributor & agent context
+# Archerik Backend — contributor & agent context
 
 Orientation for anyone (human or coding agent) changing this repository. It explains what the
 service is, how a request flows through it, and the invariants that must survive every change.
@@ -13,9 +13,9 @@ comment can drift but the types cannot:
 
 ---
 
-## 1. What Cartograph is
+## 1. What Archerik is
 
-Cartograph is a **service catalog** for fleets of Spring Boot microservices, built from static
+Archerik is a **service catalog** for fleets of Spring Boot microservices, built from static
 analysis rather than from a wiki nobody updates.
 
 A scanner walks a repository and reports what it found: the REST endpoints a service exposes, the
@@ -30,7 +30,7 @@ the catalog through read-only tools, using the account's own provider key.
 ### The core principle: honesty about detection
 
 Static analysis has limits, and the interesting question is never "did it find everything" but "does
-it tell you what it couldn't find". Cartograph's answer:
+it tell you what it couldn't find". Archerik's answer:
 
 - every edge and contract carries a **confidence** — `confirmed` (declared in code, e.g.
   `@FeignClient`), `likely` (inferred, e.g. a `WebClient` base URL resolved from config), or

@@ -1,16 +1,20 @@
 <div align="center">
 
-# 🗺️ Cartograph
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/archerik-lockup-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/archerik-lockup-light.svg">
+  <img src="./assets/archerik-lockup-light.svg" alt="Archerik" width="248">
+</picture>
 
 ### A service catalog for Spring Boot fleets — built from static analysis, and honest about what it couldn't figure out
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-00B3CB?style=flat-square&labelColor=005865)](./LICENSE)
+[![Tests](https://img.shields.io/badge/e2e-117%20passing-00B3CB?style=flat-square&labelColor=005865)](#-testing)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![NestJS](https://img.shields.io/badge/NestJS-10-e0234e?style=flat-square&logo=nestjs&logoColor=white)](https://nestjs.com)
 [![Prisma](https://img.shields.io/badge/Prisma-5-2D3748?style=flat-square&logo=prisma&logoColor=white)](https://prisma.io)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/e2e-117%20passing-success?style=flat-square)](#-testing)
 
 **[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[API](#-api-reference)** · **[Ask](#-ask--bring-your-own-key)** · **[Contributing](#-contributing)**
 
@@ -42,7 +46,7 @@ Every organisation past about fifteen services has the same three problems:
 > 🕸️ The architecture diagram was last accurate in 2023.
 
 Tools that solve this by asking teams to maintain a manifest fail for the obvious reason. Tools that
-solve it with runtime tracing miss the code paths that didn't fire today. Cartograph reads the
+solve it with runtime tracing miss the code paths that didn't fire today. Archerik reads the
 source — and, crucially, **tells you where reading the source wasn't enough.**
 
 That last part is the design centre of this project:
@@ -235,7 +239,8 @@ You'll get back the PR comment CI would post:
 docker compose --profile tools up -d adminer   # http://localhost:8080
 ```
 
-Server `db`, user / password / database all `cartograph`.
+Server `db`, user / password / database all `cartograph` — the local Compose credentials still carry
+the project's former name, and renaming them would orphan every existing dev volume.
 
 </details>
 
@@ -486,6 +491,7 @@ CLAUDE.md                    # architecture, storage rationale, the invariants (
 .github/workflows/ci.yml     # lint, typecheck, build, migrate, seed, e2e
 docker-compose.yml           # local Postgres (+ optional Adminer)
 
+assets/                      # the brand mark and lockups — see below
 prisma/
   schema.prisma              # the data model (see CLAUDE.md §4)
   migrations/                # ordered, committed alongside schema changes
@@ -515,6 +521,39 @@ test/                        # e2e suites + mock IdP / stub provider fixtures
 There is no `docs/` directory on purpose. The wire shapes are defined by the types that serve them
 (`src/common/types.ts`, `src/common/enums.ts`, `src/ingest/model.ts`) and pinned against live HTTP
 responses by the e2e suites, so there is no prose copy to drift out of date.
+
+<details>
+<summary><b>🎨 The mark, and the four values it's drawn from</b></summary>
+
+The spider is the nock: its rear legs splay like fletching against the bowstring, and the shaft runs
+out of the frame to the right. Everything is circles and arcs on one radius family, so it redraws
+cleanly at any size and survives being cut to a single colour.
+
+The whole thing is one hue ramp — **oklch hue 210** — at four lightness steps:
+
+| Role | oklch | Dark ground | Light ground |
+|---|---|---|---|
+| body (holds the centre) | `L 0.84` / `L 0.42` | `#80DBEB` | `#005A6B` |
+| legs | `L 0.70` / `L 0.58` | `#00B3CB` | `#008DA4` |
+| bow | `L 0.56` / `L 0.52` | `#008598` | `#00798C` |
+| string | `L 0.42` / `L 0.72` | `#005865` | `#77AFB9` |
+
+`#00B3CB` is the base — it's the badge colour above and the one to reach for when a single accent is
+all you get.
+
+```
+assets/archerik-mark.svg           64-grid mark, dark ground / full ramp
+assets/archerik-mark-light.svg     the same geometry, ramp inverted for white
+assets/archerik-lockup-dark.svg    stacked mark + wordmark  ─┬─ the README header,
+assets/archerik-lockup-light.svg   the light-ground pair     ─┘  switched by <picture>
+```
+
+Authored in hex rather than `oklch()` so the files render identically in GitHub's image sandbox and
+in raster converters, with the oklch source values kept in a comment at the top of each file. Every
+stroked path declares its own `fill="none"` — the bow arc fills solid black if it's left to inherit,
+which is the failure mode you hit the first time you paste the paths into a component.
+
+</details>
 
 > [!TIP]
 > **Four files carry most of the interesting logic:** `ingest.service.ts` (orchestration),
@@ -592,7 +631,13 @@ rather than a public issue.
 
 <div align="center">
 
-**Built with the conviction that a tool which admits what it doesn't know<br/>is worth more than one that guesses confidently.** 🗺️
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/archerik-mark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/archerik-mark-light.svg">
+  <img src="./assets/archerik-mark-light.svg" alt="" width="34">
+</picture>
+
+**Built with the conviction that a tool which admits what it doesn't know<br/>is worth more than one that guesses confidently.**
 
 [MIT](./LICENSE) © Farhad Amjady
 
