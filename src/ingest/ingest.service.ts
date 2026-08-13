@@ -1,0 +1,275 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
+import { Account } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { AccountProjectionService } from './account-projection.service';
+import { diffGraph } from './graphdiff';
+import { renderMarkdown } from './markdown';
+import { EMPTY_SERVICE, Entitlement, IngestResponse, ServiceBody } from './model';
+import { systemOf } from './project';
+import { resolveAll } from './resolve';
+
+/** Commit metadata the extractor sends in headers (body stays the pure graph). */
+export interface IngestHeaders {
+  sha?: string;
+  branch?: string;
+  pr?: string;
+  defaultBranch?: string;
+}
+
+@Injectable()
+export class IngestService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projection: AccountProjectionService,
+  ) {}
+
+  /**
+   * Entitlement gate shared by /v1/auth/validate and /v1/ingest. Maps to the contract's status
+   * codes: expired entitlement -> 403 (not entitled); no quota left -> 429 (quota exceeded).
+   * A bad/absent key is already a 401 from ApiKeyGuard before we get here.
+   */
+  assertEntitled(account: Account): Entitlement {
+    if (account.expiresAt.getTime() <= Date.now()) {
+      throw new ForbiddenException('Entitlement expired');
+    }
+    if (account.quotaRemaining <= 0) {
+      throw new HttpException('Quota exceeded', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    return {
+      plan: account.plan,
+      quota_remaining: account.quotaRemaining,
+      expires_at: account.expiresAt.toISOString(),
+    };
+  }
+
+  private parseBody(raw: Buffer): ServiceBody {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.toString('utf8'));
+    } catch {
+      throw new BadRequestException('Body is not valid JSON');
+    }
+    const body = parsed as Partial<ServiceBody>;
+    if (!body || typeof body.service_id !== 'string' || body.service_id.length === 0) {
+      // Reference stub returns 400 for a body that isn't a service graph (missing service_id).
+      throw new BadRequestException('Body is not a service graph (missing service_id)');
+    }
+    // Slices are always emitted per spec, but be defensive against a partial fixture.
+    return {
+      databases_used: [],
+      config_dependencies: [],
+      endpoints: [],
+      outbound_dependencies: [],
+      kafka_producers: [],
+      kafka_consumers: [],
+      ...body,
+    } as ServiceBody;
+  }
+
+  /**
+   * Fleet registry for the diff's `target_resolutions`: lowercased matchable name -> canonical
+   * service_id. Scoped to a single SYSTEM — `service_id` isn't globally
+   * unique (every repo has an `order-service`), and `repository` is per-service, so the group is the
+   * system (parent of `repository`, via systemOf). Name->service stays within the emitting service's
+   * own system, never resolving to an unrelated system's same-named service (falls back to external).
+   */
+  private async knownServices(
+    accountId: string,
+    system: string,
+    selfId: string,
+  ): Promise<Map<string, string>> {
+    const rows = await this.prisma.serviceBaseline.findMany({
+      where: { accountId },
+      select: { serviceId: true, serviceName: true, repository: true },
+    });
+    const known = new Map<string, string>();
+    known.set(selfId.toLowerCase(), selfId);
+    for (const r of rows) {
+      if (systemOf(r.repository, r.serviceId) !== system) continue;
+      known.set(r.serviceId.toLowerCase(), r.serviceId);
+      if (r.serviceName) known.set(r.serviceName.toLowerCase(), r.serviceId);
+    }
+    return known;
+  }
+
+  async ingest(account: Account, raw: Buffer, headers: IngestHeaders): Promise<IngestResponse> {
+    this.assertEntitled(account);
+
+    const head = this.parseBody(raw);
+    const serviceId = head.service_id;
+    // Owning repo — part of a service's identity since `service_id` alone collides across repos.
+    // Empty string when the extractor doesn't report one (matches the baseline column default).
+    const repository = head.repository?.trim() || '';
+    const defaultBranch = headers.defaultBranch?.trim() || 'main';
+    // Absent branch => baseline branch; otherwise a PR scan unless it equals the default branch.
+    const isDefaultScan = !headers.branch || headers.branch === defaultBranch;
+
+    // Pricing tier: an account may hold at most `maxServices` distinct services, counted per
+    // (repository, service_id) — the same `order-service` in two repos is two services. A NEW
+    // service that would push the account over its limit is rejected (403) and the rejection is
+    // logged as a failed scan. Re-scanning a service the account already knows is always allowed.
+    const distinct = await this.prisma.serviceBaseline.findMany({
+      where: { accountId: account.id },
+      select: { repository: true, serviceId: true },
+      distinct: ['repository', 'serviceId'],
+    });
+    const svcKey = (repo: string, id: string) => `${repo}\u0000${id}`;
+    const knownKeys = new Set(distinct.map((r) => svcKey(r.repository, r.serviceId)));
+    const isNewService = !knownKeys.has(svcKey(repository, serviceId));
+    if (isNewService && knownKeys.size >= account.maxServices) {
+      const reason = `Service limit reached (${knownKeys.size}/${account.maxServices})`;
+      await this.recordFailedScan(
+        account.id,
+        serviceId,
+        defaultBranch,
+        headers.sha ?? null,
+        reason,
+      );
+      throw new ForbiddenException(`${reason} — cannot add "${serviceId}"`);
+    }
+
+    const existing = await this.prisma.serviceBaseline.findUnique({
+      where: {
+        accountId_repository_serviceId_defaultBranch: {
+          accountId: account.id,
+          repository,
+          serviceId,
+          defaultBranch,
+        },
+      },
+    });
+
+    // Fast path: byte-identical to the stored baseline => nothing changed, nothing to post.
+    if (existing && Buffer.from(existing.body).equals(raw)) {
+      await this.prisma.scan.create({
+        data: {
+          accountId: account.id,
+          serviceId,
+          branch: defaultBranch,
+          sha: headers.sha ?? null,
+          status: 'unchanged',
+          results: { added: 0, removed: 0, changed: 0, servicesTotal: knownKeys.size },
+        },
+      });
+      await this.consumeQuota(account.id);
+      return {
+        service_id: serviceId,
+        unchanged: true,
+        first_scan: false,
+        baseline_updated: false,
+        markdown: '',
+      };
+    }
+
+    const base: ServiceBody = existing
+      ? (JSON.parse(Buffer.from(existing.body).toString('utf8')) as ServiceBody)
+      : { ...EMPTY_SERVICE, service_id: serviceId };
+    const firstScan = !existing;
+
+    const diff = diffGraph(base, head);
+    // Resolve each outbound dependency's raw target_name against the fleet registry → service_id or
+    // "external". Scoped to the emitting service's own system.
+    diff.target_resolutions = resolveAll(
+      head.outbound_dependencies,
+      await this.knownServices(account.id, systemOf(repository, serviceId), serviceId),
+    );
+    const markdown = renderMarkdown(diff, firstScan);
+
+    // Default-branch scan updates the baseline; a PR scan never writes it.
+    const baselineUpdated = isDefaultScan;
+    await this.prisma.$transaction(async (tx) => {
+      if (baselineUpdated) {
+        await tx.serviceBaseline.upsert({
+          where: {
+            accountId_repository_serviceId_defaultBranch: {
+              accountId: account.id,
+              repository,
+              serviceId,
+              defaultBranch,
+            },
+          },
+          create: {
+            accountId: account.id,
+            repository,
+            serviceId,
+            serviceName: head.service_name ?? null,
+            language: head.language ?? null,
+            defaultBranch,
+            sha: headers.sha ?? null,
+            body: raw, // raw bytes, verbatim
+          },
+          update: {
+            serviceName: head.service_name ?? null,
+            language: head.language ?? null,
+            sha: headers.sha ?? null,
+            body: raw,
+          },
+        });
+
+        // Rebuild the read model (graph + contracts) from every baseline the account owns, so a
+        // single ingest call is all it takes for /api/v1/graph and /api/v1/contracts to reflect the
+        // whole company's architecture. The UI queries by account (via session), not by repo.
+        await this.projection.reproject(tx, account.id, defaultBranch, headers.sha ?? null);
+      }
+      // Metering: one Scan row per ingest. A new service only grows the count on a baseline write
+      // (PR scans don't persist), so servicesTotal reflects the account's post-ingest service count.
+      const servicesTotal = knownKeys.size + (isNewService && baselineUpdated ? 1 : 0);
+      await tx.scan.create({
+        data: {
+          accountId: account.id,
+          serviceId,
+          branch: defaultBranch,
+          sha: headers.sha ?? null,
+          status: 'complete',
+          firstScan,
+          baselineUpdated,
+          results: {
+            added: diff.summary.added,
+            removed: diff.summary.removed,
+            changed: diff.summary.changed,
+            servicesTotal,
+          },
+        },
+      });
+      await tx.account.update({
+        where: { id: account.id },
+        data: { quotaRemaining: { decrement: 1 } },
+      });
+    });
+
+    return {
+      service_id: serviceId,
+      unchanged: false,
+      first_scan: firstScan,
+      baseline_updated: baselineUpdated,
+      diff,
+      markdown,
+    };
+  }
+
+  private async consumeQuota(accountId: string): Promise<void> {
+    await this.prisma.account.update({
+      where: { id: accountId },
+      data: { quotaRemaining: { decrement: 1 } },
+    });
+  }
+
+  /** Logs a rejected scan (e.g. service-limit breach) so refused attempts stay auditable too. */
+  private async recordFailedScan(
+    accountId: string,
+    serviceId: string,
+    branch: string,
+    sha: string | null,
+    error: string,
+  ): Promise<void> {
+    await this.prisma.scan.create({
+      data: { accountId, serviceId, branch, sha, status: 'failed', error },
+    });
+  }
+}

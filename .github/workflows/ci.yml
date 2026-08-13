@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cartograph
+          POSTGRES_PASSWORD: cartograph
+          POSTGRES_DB: cartograph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cartograph -d cartograph"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://cartograph:cartograph@localhost:5432/cartograph?schema=public
+      # Test-only keys. Both are required at boot — the app fails closed without them.
+      SSO_ENCRYPTION_KEY: dGVzdC1zc28ta2V5LTMyLWJ5dGVzLWxvbmctYWFhYWE=
+      LLM_ENCRYPTION_KEY: dGVzdC1sbG0ta2V5LTMyLWJ5dGVzLWxvbmctYWFhYWE=
+      # CI has no egress to the providers, so key saves must not try to verify upstream.
+      LLM_VERIFY_KEYS: 'false'
+      BACKEND_PUBLIC_URL: http://localhost:3000
+      APP_URL: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Seed
+        run: npx prisma db seed
+
+      - name: End-to-end tests
+        run: npm run test:e2e

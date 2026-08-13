@@ -1,617 +1,220 @@
-# Cartograph Backend — Development Context
+# Archerik Backend — contributor & agent context
 
-Handoff spec for the backend code agent. Describes the service, its API contract, and the static-analysis extractor architecture.
+Orientation for anyone (human or coding agent) changing this repository. It explains what the
+service is, how a request flows through it, and the invariants that must survive every change.
 
----
+For the wire shapes themselves, the code is the specification — clients validate strictly, so a
+comment can drift but the types cannot:
 
-## 1. Service overview
-
-**Cartograph** is an **engineering knowledge graph** backend — a dev-tool that analyzes a GitHub repository of Spring Boot microservices and extracts its architecture in static code.
-
-### What it does
-- **Receives** a repo URL, branch, and scan scope (list of directories/modules to analyze)
-- **Extracts** the microservice architecture: services (Spring Boot app modules), dependencies (REST calls via Feign/WebClient/RestTemplate, Kafka topics via `@KafkaListener` / `KafkaTemplate`), and contracts (REST endpoint signatures, Kafka message schemas)
-- **Reports** all findings with **confidence levels** — distinguished between **confirmed** (declared in code, e.g. `@FeignClient`), **likely** (inferred from config, e.g. WebClient with base URL from properties), and **uncertain** (guessed at runtime, e.g. RestTemplate to a variable host)
-- **Tracks changes** via commit diffs — what architectural changes did each commit introduce (added/removed/changed dependencies, new contracts, confidence shifts)
-- **Persists** the graph and serves it to the frontend via REST APIs
-
-### Core principle: honesty about detection
-
-Static analysis has limits. The backend **never hides uncertainty**; instead, it:
-- Marks every edge/contract with its **confidence level** and **source** (where detection came from)
-- Flags **unresolved targets** (a call to a hostname that doesn't match any scanned service, or a config URL that can't be resolved)
-- **Never invents** — if a relationship can't be detected or confirmed, it's recorded as uncertain or omitted, not fabricated
-- Treats the graph as **factual only** — no "severity" or "breaking-change" judgments are made by the backend; judgment is left to the frontend or the user
+- **Read API (`/api/v1`)** — `src/common/types.ts` for the shapes, `src/common/enums.ts` for the
+  permitted values, `test/contract.e2e-spec.ts` for what live responses must satisfy.
+- **Ingest API (`/v1`)** — `src/ingest/model.ts` for the body and diff vocabulary,
+  `test/ingest.e2e-spec.ts` for the gates and baseline semantics.
 
 ---
 
-## 2. API contract (from UI agent)
+## 1. What Archerik is
 
-The UI expects a RESTful API with the following endpoints. All data is time-indexed (can be queried at a specific commit SHA). The API is **read-only** from the UI perspective.
+Archerik is a **service catalog** for fleets of Spring Boot microservices, built from static
+analysis rather than from a wiki nobody updates.
 
-### 2.1 GET `/api/graph`
-**Returns the current microservice architecture graph.**
+A scanner walks a repository and reports what it found: the REST endpoints a service exposes, the
+services it calls, the Kafka topics it produces and consumes, and the field-level schemas of all of
+those. It POSTs that to this backend, one JSON document per service. The backend diffs each
+submission against that service's stored baseline, returns a PR-comment-ready summary of what
+changed, and re-projects the whole account's fleet into a catalog the UI reads.
 
-**Query params:**
-- `repo` (required, string) — GitHub repo URL, e.g. `acme/shop-platform`
-- `branch` (default `main`, string) — branch name
-- `at` (optional, string) — commit SHA. If omitted, returns the current head
+On top of the catalog sits **Ask** — natural-language questions answered by an LLM that can only see
+the catalog through read-only tools, using the account's own provider key.
 
-**Response:**
-```json
-{
-  "nodes": [
-    {
-      "id": "PaymentService",
-      "name": "PaymentService",
-      "team": "payments",
-      "type": "service",
-      "note": null,
-      "deg": 12,
-      "inDeg": 8,
-      "outDeg": 4
-    },
-    {
-      "id": "StripeAPI",
-      "name": "StripeAPI",
-      "type": "external",
-      "note": null,
-      "deg": 2
-    },
-    {
-      "id": "http://pricing-svc:8080/{?}",
-      "name": "http://pricing-svc:8080/{?}",
-      "type": "unknown",
-      "note": "Target host resolved from a variable at runtime — path shape is known, service identity is not.",
-      "deg": 1
-    }
-  ],
-  "edges": [
-    {
-      "id": "e0",
-      "from": "CheckoutOrchestrator",
-      "to": "PaymentService",
-      "protocol": "rest",
-      "method": "FeignClient",
-      "confidence": "confirmed",
-      "label": "POST /payments"
-    },
-    {
-      "id": "e1",
-      "from": "PaymentService",
-      "to": "StripeAPI",
-      "protocol": "rest",
-      "method": "WebClient",
-      "confidence": "likely",
-      "label": "POST /v1/charges"
-    },
-    {
-      "id": "e2",
-      "from": "OrderService",
-      "to": "OrderCreated",
-      "protocol": "kafka",
-      "method": "@KafkaListener",
-      "confidence": "confirmed",
-      "label": "OrderCreated"
-    }
-  ],
-  "teams": [
-    {
-      "id": "payments",
-      "name": "Payments",
-      "tier": 2,
-      "hue": 150
-    }
-  ],
-  "meta": {
-    "scannedAt": "2024-07-13T14:22:01Z",
-    "commit": "a3f19c2",
-    "branch": "main",
-    "serviceCount": 92,
-    "depCount": 189
-  }
-}
-```
+### The core principle: honesty about detection
 
-**Node types:**
-- `service` — a Spring Boot microservice (module/app in the monorepo)
-- `external` — third-party API (Stripe, Twilio, etc.)
-- `unknown` — unresolved target (can't resolve to a scanned service; runtime URL, legacy host, etc.)
+Static analysis has limits, and the interesting question is never "did it find everything" but "does
+it tell you what it couldn't find". Archerik's answer:
 
-**Edge confidence levels:**
-- `confirmed` — declared in code (@FeignClient, registered KafkaTemplate, etc.)
-- `likely` — inferred (WebClient with base URL from properties, code-detected but config-resolved)
-- `uncertain` — guessed (RestTemplate to variable host, topic with no producer, etc.)
+- every edge and contract carries a **confidence** — `confirmed` (declared in code, e.g.
+  `@FeignClient`), `likely` (inferred, e.g. a `WebClient` base URL resolved from config), or
+  `uncertain` (a `RestTemplate` call to a runtime variable)
+- an unresolvable call target becomes a **visible `unknown` node with a note explaining why**, never
+  a dropped edge
+- nothing is invented — including by the LLM, which is structurally prevented from citing evidence
+  that doesn't exist (§3.3)
+- no severity or breaking-change judgments anywhere; the catalog states facts, humans judge them
 
-**Edge protocols:** `rest` or `kafka`
+## 2. System shape
 
-**Edge methods (REST):** `FeignClient`, `WebClient`, `RestTemplate`, `route` (for API Gateway)
+Three repositories, of which this is one:
 
-**Edge methods (Kafka):** `@KafkaListener`, `KafkaTemplate`
+| Repo | Role |
+|---|---|
+| `service-discovery` | the scanner — a Go CLI that runs in CI and POSTs one document per service |
+| **`service-discovery-backend-chore`** | **this repo** — the control plane: ingest, diff, catalog, Ask |
+| `service-discovery-backend-ui` | the web UI that reads the catalog |
 
----
+Only this backend needs to exist for the API to be useful; the ingest contract is plain HTTP + JSON,
+so any scanner that can produce the body typed in `src/ingest/model.ts` works.
 
-### 2.2 GET `/api/contracts`
-**Returns all REST endpoints and Kafka topics detected in the graph.**
+**Stack:** NestJS 10 (TypeScript) · PostgreSQL via Prisma · Docker Compose for local Postgres.
 
-**Query params:**
-- `repo` (required)
-- `branch` (default `main`)
-- `at` (optional, commit SHA)
-- `protocol` (optional, `rest` or `kafka`) — filter by protocol
+## 3. The two APIs
 
-**Response:**
-```json
-{
-  "endpoints": [
-    {
-      "id": "ep0",
-      "kind": "rest",
-      "service": "PaymentService",
-      "verb": "POST",
-      "path": "/payments",
-      "source": "in-code DTO (Feign)",
-      "confidence": "confirmed",
-      "method": "FeignClient",
-      "unresolved": false,
-      "callers": ["CheckoutOrchestrator", "RefundService"],
-      "request": [
-        { "name": "orderId", "type": "UUID", "nullable": false, "note": null },
-        { "name": "amount", "type": "decimal", "nullable": false, "note": null },
-        { "name": "currency", "type": "string(3)", "nullable": false, "note": null }
-      ],
-      "response": [
-        { "name": "paymentId", "type": "UUID", "nullable": false, "note": null },
-        { "name": "status", "type": "enum(AUTHORIZED,CAPTURED,FAILED)", "nullable": false, "note": null },
-        { "name": "gatewayRef", "type": "string", "nullable": true, "note": null }
-      ]
-    }
-  ],
-  "topics": [
-    {
-      "id": "tp0",
-      "kind": "kafka",
-      "topic": "OrderCreated",
-      "producer": "OrderService",
-      "source": "Schema Registry (Avro)",
-      "confidence": "confirmed",
-      "consumers": ["StockReservationService", "NotificationService", "AnalyticsIngestService"],
-      "message": [
-        { "name": "orderId", "type": "UUID", "nullable": false, "note": null },
-        { "name": "customerId", "type": "UUID", "nullable": false, "note": null },
-        { "name": "couponCode", "type": "string", "nullable": true, "note": "added in c98d0aa" }
-      ]
-    }
-  ]
-}
-```
-
-**Contract source types:**
-- `in-code DTO (Feign)` — request/response types inferred from Feign client interface
-- `in-code DTO (WebClient)` — inferred from WebClient call sites
-- `in-code (RestTemplate)` — RestTemplate call, shape uncertain
-- `OpenAPI spec` — from @OpenAPI annotation or external spec file
-- `in-code (shape unresolved)` — target is unresolved, so schema is best-effort
-- `Schema Registry (Avro)` — Kafka topic schema from registry
-- `no registered schema` — Kafka topic detected, no schema found
-
----
-
-### 2.3 GET `/api/diffs`
-**Returns architectural changes by commit.**
-
-**Query params:**
-- `repo` (required)
-- `branch` (default `main`)
-- `since` (optional, commit SHA) — return commits after this one; if omitted, returns last N commits
-- `limit` (optional, int, default 20) — max commits to return
-
-**Response:**
-```json
-{
-  "commits": [
-    {
-      "sha": "a3f19c2",
-      "author": {
-        "name": "Priya Nair",
-        "handle": "priyan",
-        "email": "priyan@acme.com",
-        "initials": "PN",
-        "hue": 262
-      },
-      "message": "checkout: apply basket-level promotions",
-      "when": "2024-07-13T12:30:00Z",
-      "pr": "#1847",
-      "branch": "feat/basket-promos",
-      "changes": [
-        {
-          "op": "add",
-          "kind": "dependency",
-          "from": "CheckoutOrchestrator",
-          "to": "PromotionService",
-          "protocol": "rest",
-          "confidence": "likely",
-          "contract": "POST /promotions/apply",
-          "detail": "New WebClient call — target resolved from a base-URL property, so recorded as likely."
-        },
-        {
-          "op": "add",
-          "kind": "endpoint",
-          "from": "PromotionService",
-          "to": null,
-          "protocol": "rest",
-          "confidence": "likely",
-          "contract": "POST /promotions/apply",
-          "detail": "Endpoint first seen this commit."
-        }
-      ]
-    }
-  ]
-}
-```
-
-**Change ops:**
-- `add` — new edge, endpoint, topic, or schema field
-- `remove` — deleted edge, endpoint, topic
-- `change` — modified (e.g., endpoint path changed, schema field type changed)
-- `confidence` — confidence level of an edge increased/decreased (e.g., likely → confirmed when code was refactored to use declared Feign client)
-
-**Change kinds:**
-- `dependency` — edge between two services (REST or Kafka)
-- `endpoint` — new REST endpoint exposed by a service
-- `topic` — new Kafka topic produced/consumed
-- `schema` — schema modification (e.g., field added to a contract)
-
-**Detail:** factual, single-sentence explanation of the change. **Never includes breaking-change judgments.**
-
----
-
-### 2.4 GET `/api/schema/:contractId`
-**Returns the full schema for a contract (REST endpoint or Kafka topic).**
-
-**Params:**
-- `contractId` (required) — the contract ID from `/api/contracts`
-
-**Query params:**
-- `repo` (required)
-- `branch` (default `main`)
-- `at` (optional, commit SHA)
-
-**Response:**
-```json
-{
-  "id": "ep0",
-  "kind": "rest",
-  "service": "PaymentService",
-  "verb": "POST",
-  "path": "/payments",
-  "source": "in-code DTO (Feign)",
-  "confidence": "confirmed",
-  "method": "FeignClient",
-  "unresolved": false,
-  "callers": ["CheckoutOrchestrator", "RefundService"],
-  "request": [
-    { "name": "orderId", "type": "UUID", "nullable": false, "note": null },
-    { "name": "amount", "type": "decimal", "nullable": false, "note": null },
-    { "name": "currency", "type": "string(3)", "nullable": false, "note": null },
-    { "name": "method", "type": "enum(CARD,WALLET,GIFT_CARD)", "nullable": false, "note": null },
-    { "name": "idempotencyKey", "type": "string", "nullable": false, "note": null }
-  ],
-  "response": [
-    { "name": "paymentId", "type": "UUID", "nullable": false, "note": null },
-    { "name": "status", "type": "enum(AUTHORIZED,CAPTURED,FAILED)", "nullable": false, "note": null },
-    { "name": "authorizedAt", "type": "timestamp", "nullable": true, "note": null },
-    { "name": "gatewayRef", "type": "string", "nullable": true, "note": null }
-  ],
-  "history": [
-    { "op": "add", "sha": "a1b2c3d", "when": "2024-07-10T08:00:00Z", "detail": "Endpoint first seen." },
-    { "op": "change", "sha": "b2c3d4e", "when": "2024-07-12T14:22:00Z", "detail": "Field added: idempotencyKey : string" }
-  ]
-}
-```
-
----
-
-### 2.5 GET `/api/services/:serviceName`
-**Returns details about a single service.**
-
-**Params:**
-- `serviceName` (required) — service name, e.g. `PaymentService`
-
-**Query params:**
-- `repo` (required)
-- `branch` (default `main`)
-- `at` (optional, commit SHA)
-
-**Response:**
-```json
-{
-  "id": "PaymentService",
-  "name": "PaymentService",
-  "team": "payments",
-  "type": "service",
-  "note": null,
-  "deg": 12,
-  "inDeg": 8,
-  "outDeg": 4,
-  "inbound": [
-    { "from": "CheckoutOrchestrator", "protocol": "rest", "method": "FeignClient", "confidence": "confirmed", "label": "POST /payments" },
-    { "from": "RefundService", "protocol": "rest", "method": "FeignClient", "confidence": "confirmed", "label": "POST /payments/{id}/refund" }
-  ],
-  "outbound": [
-    { "to": "FraudCheckService", "protocol": "rest", "method": "FeignClient", "confidence": "confirmed", "label": "POST /fraud/check" },
-    { "to": "StripeAPI", "protocol": "rest", "method": "WebClient", "confidence": "likely", "label": "POST /v1/charges" }
-  ],
-  "endpoints": [
-    { "id": "ep0", "verb": "POST", "path": "/payments", "confidence": "confirmed", "callers": 2 },
-    { "id": "ep1", "verb": "GET", "path": "/payments/{id}", "confidence": "confirmed", "callers": 1 }
-  ],
-  "produced_topics": [
-    { "id": "tp0", "topic": "PaymentAuthorized", "confidence": "confirmed", "consumers": 3 },
-    { "id": "tp1", "topic": "PaymentCaptured", "confidence": "confirmed", "consumers": 2 },
-    { "id": "tp2", "topic": "PaymentFailed", "confidence": "confirmed", "consumers": 3 }
-  ],
-  "consumed_topics": []
-}
-```
-
----
-
-### 2.6 POST `/api/scan`
-**Triggers a new scan of a repository.**
-
-**Request body:**
-```json
-{
-  "repo": "acme/shop-platform",
-  "branch": "main",
-  "scanScope": [
-    "services/",
-    "libs/",
-    "infrastructure/"
-  ],
-  "excludePaths": [
-    "**/test/",
-    "**/target/",
-    "**/.git/"
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "scanId": "scan_abc123",
-  "status": "queued",
-  "repo": "acme/shop-platform",
-  "branch": "main",
-  "queuedAt": "2024-07-13T14:30:00Z",
-  "estimatedDuration": "5m"
-}
-```
-
-The scan runs asynchronously. Frontend can poll `/api/scan/:scanId` to check progress.
-
----
-
-### 2.7 GET `/api/scan/:scanId`
-**Poll the status of a scan.**
-
-**Response (in progress):**
-```json
-{
-  "scanId": "scan_abc123",
-  "status": "in_progress",
-  "progress": {
-    "phase": "extracting_kafka",
-    "current": 45,
-    "total": 92,
-    "percent": 49
-  },
-  "startedAt": "2024-07-13T14:30:15Z"
-}
-```
-
-**Response (complete):**
-```json
-{
-  "scanId": "scan_abc123",
-  "status": "complete",
-  "repo": "acme/shop-platform",
-  "branch": "main",
-  "commit": "a3f19c2",
-  "completedAt": "2024-07-13T14:35:42Z",
-  "duration": "5m 27s",
-  "results": {
-    "services": 92,
-    "dependencies": 189,
-    "endpoints": 134,
-    "topics": 21,
-    "unresolved": 5
-  }
-}
-```
-
----
-
-## 3. Extractor architecture
-
-The extractor is the heart of the system. It's a **static code analysis engine** that walks a git repo and extracts the microservice graph.
-
-### 3.1 High-level flow
+The service exposes two surfaces with **different base paths, different credentials, and different
+audiences**. They deliberately do not cross: a session token is rejected at `/v1/*`, and an API key
+is rejected at `/api/v1/*`.
 
 ```
-Git repo (clone / fetch)
-  ↓
-Scanner: discover Spring Boot modules + main classes
-  ↓
-Parser: analyze each module's code
-  ├─ Extract REST endpoints (@RestController, @RequestMapping, @GetMapping/@PostMapping/etc.)
-  ├─ Extract REST callers (Feign clients, WebClient calls, RestTemplate calls)
-  ├─ Extract Kafka producers (KafkaTemplate calls) + consumers (@KafkaListener)
-  ├─ Parse request/response body types (from DTO classes, @RequestBody/@ResponseBody)
-  ├─ Resolve Kafka schemas (Schema Registry, Avro, or infer from code)
-  └─ Assign confidence levels based on how the call was detected
-  ↓
-Graph builder: merge all findings into nodes/edges
-  ├─ Deduplicate (same endpoint detected multiple times = one node)
-  ├─ Resolve targets (does a call to hostname X match any scanned service?)
-  ├─ Compute statistics (degree, team assignment)
-  └─ Identify unknowns (unresolved targets, runtime URLs, etc.)
-  ↓
-Diff engine: compare against previous scan
-  ├─ Identify added/removed/changed edges, endpoints, topics, schemas
-  ├─ Track which commits introduced each change
-  └─ Record confidence shifts
-  ↓
-Persist: store graph + commit history in DB
-  ↓
-API: serve via REST endpoints
+      CI  ──API key──▶  /v1/*        write   ingest, diff, PR comment
+    human ──session──▶  /api/v1/*    read    catalog, contracts, Ask, settings
 ```
 
-### 3.2 Confidence levels and detection methods
+### 3.1 Write side (`/v1`) — `src/ingest/`
 
-| Confidence | Detection method | REST examples | Kafka examples |
-|---|---|---|---|
-| **confirmed** | Declared in code with a target | `@FeignClient(name="PaymentService")` interface + call site | `KafkaTemplate.send("topic")` with hardcoded topic; `@KafkaListener(topics="...")` |
-| **likely** | Inferred from config; code-detected but URL resolved from properties | `WebClient.create(baseUrl)` where `baseUrl = env.getProperty(...)` | Code-detected listener, but topic name from config property |
-| **uncertain** | Guessed; runtime variable or can't resolve target | `RestTemplate.postForObject(url, ...)` where `url` is a method arg | Topic consumed but no producer found; no schema registered |
+`POST /v1/auth/validate` is a free startup gate; `POST /v1/ingest` accepts one service's graph.
 
-### 3.3 Key analyzer components
+The flow inside `ingest.service.ts`: entitlement + service-limit check → byte-compare against the
+stored baseline (unchanged ⇒ early return) → `graphdiff.ts` computes the semantic diff →
+`resolve.ts` maps each raw target name to a known service or `external` → `markdown.ts` renders the
+PR comment → and, **only on a default-branch scan**, the baseline is written and
+`account-projection.service.ts` rebuilds the read model.
 
-#### **REST Endpoint Analyzer**
-- Walks code for `@RestController`, `@RequestMapping`, `@GetMapping`, `@PostMapping`, etc.
-- For each endpoint: extract verb (GET/POST/PUT/DELETE), path, request/response body types
-- Resolve body types by walking the DTO class hierarchy (field names, types, nullable modifiers like `@Nullable`, `Optional<T>`)
-- Source attribution: if the class has an `@FeignClient` interface (indicating it's consumed by others), mark as `in-code DTO (Feign)`. If there's an `@OpenAPI` annotation, mark as `OpenAPI spec`.
+Two things here are load-bearing:
 
-#### **REST Caller Analyzer**
-- Scans for `@FeignClient` interface definitions → confirmed caller (declared target)
-- Scans for `WebClient.create(url)` / `WebClient.builder()` calls → likely (URL may be from config)
-- Scans for `RestTemplate` calls → uncertain (URL often from variable/config at runtime)
-- Extracts endpoint label (verb + path) by pattern-matching the call (e.g., `client.getForObject(path, ...)` → GET, etc.)
+- **The submitted body is stored as raw bytes and never re-marshalled.** The "unchanged" fast path
+  is a literal byte comparison, so re-serialising would reorder keys and break it.
+- **A PR scan diffs but never writes the baseline.** A pull request cannot move recorded truth.
 
-#### **Kafka Analyzer**
-- Scans for `KafkaTemplate` usages → producer. Extracts topic name and message type (from the generic param `<String, MessageType>` or from the template call).
-- Scans for `@KafkaListener(topics="...")` annotations → consumer. Extracts topic name and message type.
-- **Producer confidence**: if the message type is registered in Schema Registry (Avro), mark as confirmed. Otherwise likely.
-- **Consumer confidence**: if the topic has a registered producer and schema, mark as confirmed. If no producer found, mark as uncertain.
-- Resolves message schemas via Schema Registry API (if available) or infers from code (message class DTO).
+### 3.2 Read side (`/api/v1`) — `src/graph/`, `src/contracts/`, `src/commits/`
 
-#### **Target Resolver**
-- For each edge, attempt to resolve the target hostname/service name to a scanned Spring Boot service
-- Heuristics:
-  - Direct service name match (e.g., `PaymentService` → found in repo) → confirmed
-  - Hostname with known pattern (e.g., `payment-service.dev.svc.cluster.local` → `PaymentService`) → likely
-  - Config property (e.g., `spring.payment.url = ...`) → resolve at scan time; if resolved to a scanned service, likely; if not, uncertain
-  - Variable/runtime URL → uncertain, record as `unknown` node with a note
-- External APIs (known third-party domains like `stripe.com`, `api.twilio.com`) → mark as `external` type
-- Unresolved targets → mark as `unknown` type with a descriptive note
+Scoped to the **account** (the company), derived from the session token — never from a query param.
+`GET /graph` with no parameters returns everything the account owns; `repo` and `service` are
+optional filters, not required keys. A fresh account with no scans returns `200` with an empty
+graph, not a `404`.
 
-#### **Schema Induction**
-- For REST: walk the DTO class (request/response types), extract all fields with their types and nullability (from `@Nullable`, `Optional`, `@NotNull`)
-- For Kafka: same process on the message DTO
-- **Type inference**: detect common types (`UUID`, `BigDecimal`, enums, arrays, nested objects) and render as strings (e.g., `array<LineItem>`, `enum(PENDING,PAID,SHIPPED)`)
-- **Field notes**: if a field was added/removed/changed in a recent commit, attach a note linking to the commit SHA (e.g., `"added in c98d0aa"`)
+The read model is materialised: one `Graph` row per `(account, branch)`, overwritten in place on
+every ingest that changes a baseline. Reads are a single row fetch plus filtering, not a join over
+baselines.
 
-### 3.4 Commit diff engine
+`GET /commits` currently returns `[]` by design — the scanner doesn't send commit metadata yet, so
+no per-commit diffs are projected.
 
-Runs after each scan. Compares the new graph against the previous one:
+### 3.3 Ask (`POST /api/v1/ask`) — `src/ask/`, `src/llm/`
 
-```
-For each edge/endpoint/topic:
-  If it exists in previous but not new → op: 'remove'
-  If it exists in new but not previous → op: 'add'
-  If it exists in both:
-    If target changed (e.g., host name different) → op: 'change'
-    If confidence increased (e.g., likely → confirmed) → op: 'confidence'
-    If schema changed (field added/removed/type changed) → op: 'change' with detail
-```
+Bring-your-own-key: the account stores its own Anthropic or OpenAI key (encrypted at rest), and Ask
+spends it. No key for the chosen model's provider ⇒ `409`.
 
-For each commit between the previous scan and now, attribute the change:
-```
-git log <prevSha>..<newSha> --oneline
-For each commit:
-  diff the graph state before/after the commit
-  Record which edges/contracts/fields were added/removed/changed
-  Store as a change record with the commit SHA, author, message
-```
+Grounding is **structural, not prompted**. The model never receives a graph dump; it reaches the
+catalog only through read-only tools in `catalog-tools.ts`. Every relationship a tool returns is
+recorded in a per-request evidence ledger with an id. The model names the ids it used, and the
+backend renders the response's `cites` from the *recorded rows* — so an id the model invented
+resolves to nothing and is dropped. `text` comes from the model; `cites` and `note` are computed by
+the backend. A provider failure is always a 4xx/5xx with an `error` string, never a fabricated
+answer.
 
----
+Providers sit behind one interface (`llm/provider.types.ts`) modelling a single round trip. Adding
+one is an adapter plus an entry in `llm/model-registry.ts`, which is also the source of truth for
+`GET /models`.
 
-## 4. Data model (database)
+### 3.4 Auth — `src/auth/`
 
-The backend persists:
-- **Graphs**: keyed by `(repo, branch, commit_sha)`. Immutable — once stored, never modified.
-- **Contracts** (endpoints + topics): indexed by graph, keyed by contract ID
-- **Commits**: indexed by graph, keyed by SHA. Includes change records.
-- **Schemas**: versioned by commit. Each field carries a note about when it was added/changed.
+Sessions are **opaque, DB-backed tokens**, not JWTs, stored as `sha256(token)` — so logout can
+revoke server-side and a database dump can't be replayed. Passwords are bcrypt-hashed.
 
-Example schema (PostgreSQL):
-```sql
-CREATE TABLE graphs (
-  id UUID PRIMARY KEY,
-  repo TEXT NOT NULL,
-  branch TEXT NOT NULL,
-  commit_sha VARCHAR(40) NOT NULL,
-  scanned_at TIMESTAMP NOT NULL,
-  data JSONB NOT NULL,  -- the full graph (nodes, edges, teams)
-  UNIQUE(repo, branch, commit_sha)
-);
+SSO is real multi-tenant OIDC: each account brings its own IdP, routed by email domain, Authorization
+Code + PKCE, with JIT provisioning. An email already belonging to a *different* account is always
+rejected, never silently reassigned.
 
-CREATE TABLE commits (
-  id UUID PRIMARY KEY,
-  graph_id UUID NOT NULL REFERENCES graphs(id),
-  commit_sha VARCHAR(40) NOT NULL,
-  author_name TEXT NOT NULL,
-  author_email TEXT NOT NULL,
-  message TEXT NOT NULL,
-  pr TEXT,
-  branch TEXT,
-  when TIMESTAMP NOT NULL,
-  changes JSONB NOT NULL,  -- array of change records
-  FOREIGN KEY (graph_id) REFERENCES graphs(id)
-);
+## 4. Data model
 
-CREATE TABLE contracts (
-  id UUID PRIMARY KEY,
-  graph_id UUID NOT NULL REFERENCES graphs(id),
-  kind TEXT NOT NULL,  -- 'rest' or 'kafka'
-  data JSONB NOT NULL,  -- the contract object
-  FOREIGN KEY (graph_id) REFERENCES graphs(id)
-);
+Prisma schema in `prisma/schema.prisma`. The shape follows one idea: **store the extractor's truth
+verbatim, and materialise everything else.**
 
-CREATE TABLE scans (
-  id UUID PRIMARY KEY,
-  repo TEXT NOT NULL,
-  branch TEXT NOT NULL,
-  status TEXT NOT NULL,  -- 'queued', 'in_progress', 'complete', 'failed'
-  started_at TIMESTAMP,
-  completed_at TIMESTAMP,
-  results JSONB,  -- {services, dependencies, endpoints, topics, unresolved}
-  error TEXT
-);
-```
+| Table | Role |
+|---|---|
+| `service_baselines` | the source of truth — the scanner's byte-stable JSON per `(account, repository, service_id, default_branch)` |
+| `graphs` | materialised read model, one row per `(account, branch)`, overwritten in place |
+| `contracts` | endpoints/topics belonging to a graph row |
+| `commits` | per-commit change records (unpopulated until the scanner sends commit metadata) |
+| `scans` | one row per ingest call — the account's audit/metering log, including rejections |
+| `accounts`, `api_keys` | tenants and their scanner credentials (keys stored hashed) |
+| `users`, `sessions` | login and opaque session tokens (both hashed) |
+| `sso_connections`, `sso_domains`, `sso_auth_requests` | per-tenant OIDC config and in-flight logins |
+| `llm_provider_keys` | per-account provider keys, encrypted at rest, with `last4` denormalised |
 
----
+Three storage decisions worth knowing before you change them:
 
-## 5. Technology choices
+- **Hashed vs. encrypted is not a style choice.** Credentials presented *to* us (API keys, session
+  tokens) are hashed — we only ever compare them. Credentials we present *onward* (OIDC client
+  secrets, LLM provider keys) are encrypted with AES-256-GCM, because they must be recoverable.
+  `SSO_ENCRYPTION_KEY` and `LLM_ENCRYPTION_KEY` are deliberately separate variables so one leaked
+  key doesn't unlock both classes.
+- **`last4` is stored in the clear on purpose.** The endpoint the UI polls needs only "configured +
+  last four characters", so that read path never loads the encryption key or holds a plaintext key
+  in memory.
+- **`repository` is part of the baseline key.** `service_id` is a directory name and collides across
+  repos; without `repository` in the key, two `order-service`s clobber each other.
 
-- **Language**: Java (Spring Boot microservice itself) or Go (lightweight scanner/extractor)
-- **Parsing**: use existing static-analysis libraries (e.g., JavaParser for Java, go/ast for Go)
-- **Schema Registry**: Confluent Schema Registry API for Kafka schema resolution
-- **Git**: `git clone` / `git fetch` to local disk, analyze in-place
-- **Database**: PostgreSQL for persistence (graphs, commits, contracts)
-- **API**: Spring Boot REST controllers
+## 5. Ingest → catalog projection
 
----
+`src/ingest/project.ts` is a **pure, deterministic function** — no DB, no I/O — from a list of parsed
+service bodies to `{ graph, contracts }`. That purity is why it can run both in the seed script and
+in production ingest and produce identical output, and why it's testable without a database.
+
+It builds nodes for scanned services (id = `<system>/<serviceId>`, globally unique), resolves each
+outbound dependency to a scanned service / `external` host / `unknown` bucket, deduplicates
+endpoints and topics into contracts, and assigns confidence.
+
+`account-projection.service.ts` wraps it with persistence: it takes a `Prisma.TransactionClient` so
+the reprojection commits atomically with the ingest that triggered it, and takes a transaction-scoped
+advisory lock keyed on `(account, branch)` so two concurrent ingests touching `main` can't race on
+the delete-then-create.
 
 ## 6. Invariants — do not break
 
-- **Every edge must have a confidence level.** Never infer without marking the level.
-- **Unresolved targets stay visible.** If a call can't be resolved to a scanned service, create an `unknown` node with a descriptive note; never drop it.
-- **No breaking-change judgments.** The extractor is factual only. All text in the API is neutral and educational, never pejorative.
-- **Contracts are versioned by commit.** Each schema/field change is tracked and linked to the commit that introduced it.
-- **Sources are recorded.** Every contract must carry a `source` field explaining where the schema came from (code DTO, OpenAPI spec, Schema Registry, etc.).
-- **Derived vs. declared.** REST callers are "derived" from callers' code, not declared by the service. Kafka consumers are likewise derived. Always use this wording in the API to be clear.
+These are enforced in code (`src/common/integrity.ts`, run at seed time *and* against live HTTP
+responses in the e2e suite) because the UI validates strictly and fails the whole load on a
+violation. Breaking one is a user-visible outage, not a lint warning.
 
+1. **Every edge and contract carries a confidence.** Never infer without marking the level.
+2. **Unresolved targets stay visible.** A call that can't be resolved becomes an `unknown` node
+   **with a note explaining why** — never a dropped edge. `validateGraph` rejects a note-less
+   `unknown` node.
+3. **A Kafka topic with no producer in scan scope is `uncertain`.** A consumer's own
+   `@KafkaListener` confidence must not promote the topic.
+4. **Edge endpoints must reference real nodes.** Every `edge.from` / `edge.to` must match a node id,
+   and every node's `team` must exist in `teams[]`.
+5. **Enums are exact lowercase strings.** `confidence: confirmed|likely|uncertain`,
+   `protocol: rest|kafka|grpc|websocket|unknown`, node `type: service|external|unknown`. `method` is
+   the deliberate exception — a free display string, passed through verbatim, never validated.
+6. **Nothing is invented.** For extraction that means recording uncertainty instead of guessing; for
+   Ask it means citations are rendered from the evidence ledger, so a made-up id resolves to nothing.
+7. **No breaking-change or severity judgments.** All API text is factual and neutral. This applies
+   especially to the PR-comment markdown, which lands verbatim in front of reviewers.
+8. **Derived vs. declared.** REST callers and Kafka consumers are *derived* from the callers' code,
+   not declared by the service. Use that wording in API text.
+9. **Every non-2xx body is `{ "error": "<string>" }`** and nothing else — including validation and
+   rate-limit rejections, normalised by `src/common/error-body.filter.ts`.
+10. **Secrets fail closed.** No encryption key ⇒ the app refuses to start rather than falling back to
+    a default. Never add a default value for `SSO_ENCRYPTION_KEY` or `LLM_ENCRYPTION_KEY`.
+
+## 7. Working in this repo
+
+```bash
+npm run start:dev     # watch mode
+npm run typecheck     # tsc --noEmit
+npm run lint          # eslint --fix
+npm run test:e2e      # needs Postgres up + seed loaded
+```
+
+Notes that will save you time:
+
+- **The e2e suite needs a real database.** `docker compose up -d db && npx prisma migrate dev &&
+  npx prisma db seed` first. Tests run with `maxWorkers: 1` because they share it.
+- **`--experimental-vm-modules` is required**, not optional — `openid-client` is ESM-only and its
+  dynamic import fails inside Jest's sandbox without it. It's already in the `test:e2e` script.
+- **No live credentials are needed for any test.** SSO runs against a mock IdP built by overriding
+  `globalThis.fetch` (real crypto, real signature/nonce validation); Ask runs against a scripted stub
+  provider; the provider adapters are pinned by pointing the real SDKs at a local server.
+- **Set `LLM_VERIFY_KEYS=false` for offline work**, or every key save fails trying to reach the
+  provider.
+- **Changing `prisma/schema.prisma` means a migration** (`npx prisma migrate dev --name <what>`),
+  committed alongside the schema change.

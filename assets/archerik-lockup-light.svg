@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 180" width="360" height="180" fill="none" role="img" aria-label="Archerik">
+  <title>Archerik</title>
+  <!--
+    Stacked lockup for light grounds — the inverted ramp, so the mark keeps its
+    value structure and the wordmark keeps AA contrast against white.
+  -->
+  <g transform="translate(136 12) scale(1.375)">
+    <path d="M32 6 L32 58" stroke="#77AFB9" stroke-width="2" fill="none"/>
+    <path d="M32 6 A26 26 0 0 1 32 58" stroke="#00798C" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <path d="M28 24 A12 12 0 0 0 20 14 M28 32 A14 14 0 0 0 18 32 M28 40 A12 12 0 0 1 20 50" stroke="#008DA4" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+    <path d="M40 24 A14 14 0 0 1 52 16 M40 40 A14 14 0 0 0 52 48" stroke="#008DA4" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+    <circle cx="34" cy="32" r="9.5" fill="#005A6B"/>
+    <path d="M44 32 L58 32" stroke="#005A6B" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  </g>
+  <text x="180" y="159" text-anchor="middle" fill="#00798C"
+        font-family="Inter,'Segoe UI',-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif"
+        font-size="46" font-weight="600" letter-spacing="-0.5">Archerik</text>
+</svg>

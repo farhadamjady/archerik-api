@@ -1,0 +1,118 @@
+import { Confidence } from '../common/enums';
+
+/** One piece of evidence an answer rests on — the row a citation is rendered from. */
+export interface AskCite {
+  name: string;
+  dir: string;
+  confidence: string;
+}
+
+/** A ledger entry: the citable fact, plus the id the model refers to it by. */
+interface Entry {
+  id: string;
+  cite: AskCite;
+}
+
+/** Matches the deterministic resolver this replaced — enough to justify an answer, not a dump. */
+const MAX_CITES = 8;
+
+/**
+ * The anti-fabrication mechanism.
+ *
+ * CLAUDE.md §6 says the backend never invents, and the UI spec says answers must "never invent
+ * edges". Prompting a model to be honest does not satisfy that. So the model is never allowed to
+ * author a citation at all:
+ *
+ *   1. Every row a catalog tool returns is recorded here and handed to the model with an `ev<n>` id.
+ *   2. The model answers in prose and names the ids it relied on.
+ *   3. {@link resolveCites} intersects those names with the ledger and renders the cites from the
+ *      recorded rows — never from anything the model wrote.
+ *
+ * A hallucinated id resolves to nothing and is dropped. A real id resolves to a row that provably
+ * came out of the database. There is no path by which invented evidence reaches the response, which
+ * makes the guarantee structural rather than a matter of the model's cooperation.
+ */
+export class EvidenceLedger {
+  private readonly entries: Entry[] = [];
+  private readonly byId = new Map<string, Entry>();
+  /** Collapses the same fact arriving twice (e.g. two tools that both surface one edge). */
+  private readonly byFact = new Map<string, Entry>();
+
+  /**
+   * Records a citable fact and returns the id to show the model. Recording the same fact twice
+   * returns the original id, so the model sees one stable handle per fact.
+   */
+  record(cite: AskCite): string {
+    const fact = `${cite.name}\u0000${cite.dir}\u0000${cite.confidence}`;
+    const existing = this.byFact.get(fact);
+    if (existing) return existing.id;
+
+    const entry: Entry = { id: `ev${this.entries.length + 1}`, cite };
+    this.entries.push(entry);
+    this.byId.set(entry.id, entry);
+    this.byFact.set(fact, entry);
+    return entry.id;
+  }
+
+  get size(): number {
+    return this.entries.length;
+  }
+
+  /** Every fact gathered this turn, in the order the tools surfaced it. */
+  all(): AskCite[] {
+    return this.entries.slice(0, MAX_CITES).map((e) => e.cite);
+  }
+
+  /**
+   * Renders the cites for ids the model named.
+   *
+   * Unknown ids are silently dropped — that is the guarantee, not an error worth surfacing. If the
+   * model named nothing usable but tools did return facts, we fall back to what was gathered rather
+   * than claiming an answer had no basis: the evidence is real either way, only the model's
+   * bookkeeping failed.
+   */
+  resolveCites(namedIds: readonly string[]): AskCite[] {
+    const seen = new Set<string>();
+    const resolved: AskCite[] = [];
+
+    for (const id of namedIds) {
+      const entry = this.byId.get(normalizeId(id));
+      if (!entry || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      resolved.push(entry.cite);
+      if (resolved.length === MAX_CITES) break;
+    }
+
+    return resolved.length > 0 ? resolved : this.all();
+  }
+}
+
+/**
+ * Model output is prose, so ids may arrive decorated — `[ev3]`, `ev3.`, `EV3`. Normalising here
+ * keeps that tolerance in one place; anything that still doesn't match a recorded id is dropped.
+ */
+function normalizeId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * The `note` on an Ask response, computed from the evidence rather than written by the model.
+ *
+ * This is deliberate. The note is a factual statement about how much the answer rests on inferred
+ * detection, and CLAUDE.md §6 forbids the backend making judgments — letting the model phrase it
+ * invites editorialising ("this looks risky"), while deriving it from the actual confidence counts
+ * keeps it factual and identical for identical evidence.
+ */
+export function buildNote(cites: readonly AskCite[]): string | null {
+  const soft = cites.filter(
+    (c) => c.confidence === 'likely' || c.confidence === 'uncertain',
+  ).length;
+  if (soft === 0) return null;
+  return `${soft} of these rest on likely/uncertain edges — treat the list as indicative, not exhaustive.`;
+}
+
+/** Confidence values that may appear on a cite, for validation at the boundary. */
+export const CITE_CONFIDENCES: readonly Confidence[] = ['confirmed', 'likely', 'uncertain'];

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" fill="none" role="img" aria-label="Archerik">
+  <title>Archerik</title>
+  <!--
+    Archerik primary mark — dark-ground / full ramp.
+    The spider is the nock: rear legs splay like fletching against the bowstring,
+    the shaft runs out to the right. One hue ramp, oklch hue 210.
+
+      body    oklch(0.84 0.09 210)  #80DBEB
+      base    oklch(0.70 0.13 210)  #00B3CB
+      bow     oklch(0.56 0.11 210)  #008598
+      string  oklch(0.42 0.08 210)  #005865
+
+    Hex is authored rather than oklch() so the file renders identically in
+    GitHub's img sandbox, older browsers and raster converters.
+    For light grounds use archerik-mark-light.svg — the ramp inverts.
+  -->
+  <path d="M32 6 L32 58" stroke="#005865" stroke-width="2" fill="none"/>
+  <path d="M32 6 A26 26 0 0 1 32 58" stroke="#008598" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M28 24 A12 12 0 0 0 20 14 M28 32 A14 14 0 0 0 18 32 M28 40 A12 12 0 0 1 20 50" stroke="#00B3CB" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  <path d="M40 24 A14 14 0 0 1 52 16 M40 40 A14 14 0 0 0 52 48" stroke="#00B3CB" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  <circle cx="34" cy="32" r="9.5" fill="#80DBEB"/>
+  <path d="M44 32 L58 32" stroke="#80DBEB" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+</svg>

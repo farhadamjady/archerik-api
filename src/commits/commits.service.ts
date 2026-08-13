@@ -12,12 +12,15 @@ export class CommitsService {
 
   /** Returns a BARE ARRAY of commits (newest first) — no { commits: [...] } wrapper. */
   async getCommits(
-    repo: string,
+    accountId: string,
     branch: string,
     limit: number,
     at?: string,
   ): Promise<CommitDto[]> {
-    const graph = await this.lookup.findGraph(repo, branch, at);
+    const graph = await this.lookup.findGraph(accountId, branch, at);
+
+    // Fresh account (no scans yet) → empty list with a 200, mirroring /graph.
+    if (!graph) return [];
 
     const rows = await this.prisma.commit.findMany({
       where: { graphId: graph.id },
