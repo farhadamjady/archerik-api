@@ -12,10 +12,10 @@ describe('extractor /v1 control plane', () => {
   const auth = `Bearer ${DEMO_API_KEY}`;
   const serviceId = `e2e-svc-${Date.now()}`;
 
-  const body = (extraDeps: unknown[] = []): string =>
+  const bodyFor = (id: string, extraDeps: unknown[] = []): string =>
     JSON.stringify({
-      service_id: serviceId,
-      service_name: `${serviceId}-service`,
+      service_id: id,
+      service_name: `${id}-service`,
       endpoints: [
         {
           method: 'GET',
@@ -31,6 +31,8 @@ describe('extractor /v1 control plane', () => {
       databases_used: [],
       config_dependencies: [],
     });
+
+  const body = (extraDeps: unknown[] = []): string => bodyFor(serviceId, extraDeps);
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -89,6 +91,23 @@ describe('extractor /v1 control plane', () => {
         baseline_updated: true,
       });
       expect(res.body.diff.summary.added).toBeGreaterThan(0);
+    });
+
+    // The tests around this one send X-EKG-*, which is what shipped extractor builds use — so they
+    // cover the legacy fallback. This one covers the canonical spelling.
+    it('accepts the canonical X-Archerik-* commit headers', async () => {
+      const id = `${serviceId}-canonical`;
+      const res = await request(app.getHttpServer())
+        .post('/v1/ingest')
+        .set('Authorization', auth)
+        .set('Content-Type', 'application/json')
+        .set('X-Archerik-Default-Branch', 'main')
+        .set('X-Archerik-Branch', 'main')
+        .set('X-Archerik-Sha', 'b1c2d3e')
+        .send(bodyFor(id))
+        .expect(200);
+      // baseline_updated proves the default-branch header was read: without it this is a PR scan.
+      expect(res.body).toMatchObject({ service_id: id, first_scan: true, baseline_updated: true });
     });
 
     it('byte-identical resubmit → unchanged fast path, no diff, empty markdown', async () => {

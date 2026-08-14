@@ -132,7 +132,7 @@ function diffCategory<T>(
     if (!hm.has(k)) removed.push(b);
   }
 
-  // Omit empty arrays; an untouched category serializes as {} (matches the reference fixtures).
+  // Omit empty arrays; an untouched category serializes as {}.
   const out: CategoryDiff<T> = {};
   if (added.length) out.added = added;
   if (removed.length) out.removed = removed;

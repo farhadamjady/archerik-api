@@ -173,7 +173,7 @@ describe('P0 API contract', () => {
       expect(typeof m.id).toBe('string');
       expect(typeof m.label).toBe('string');
       expect(typeof m.vendor).toBe('string');
-      // §5: the UI cross-references this against GET /settings/llm-keys to flag "needs key".
+      // The UI cross-references this against GET /settings/llm-keys to flag "needs key".
       expect(['anthropic', 'openai']).toContain(m.provider);
       // The provider's own model string stays server-side.
       expect(m).not.toHaveProperty('wireModel');

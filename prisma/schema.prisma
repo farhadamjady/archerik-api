@@ -1,4 +1,4 @@
-// Cartograph persistence — JSONB-centric, so the stored rows map 1:1 onto the API wire shapes and
+// Archerik persistence — JSONB-centric, so the stored rows map 1:1 onto the API wire shapes and
 // the read endpoints serve them without a translation layer. See CLAUDE.md §4 for the model.
 
 generator client {
@@ -199,7 +199,7 @@ model ServiceBaseline {
   @@map("service_baselines")
 }
 
-/// A per-account OIDC identity provider (SSO login, P1 — replaces the old ssoLogin() stub). Each
+/// A per-account OIDC identity provider for SSO login. Each
 /// Account brings its own IdP rather than sharing one global IdP, so login can be routed by the
 /// user's email domain to the right tenant's connection.
 /// `clientSecretEnc` is *encrypted*, not hashed like ApiKey.keyHash/Session.tokenHash: those are

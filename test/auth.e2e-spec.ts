@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createTestApp, DEMO_CREDENTIALS, login } from './e2e-utils';
 
 /**
- * Auth e2e (P1 §6). Requires `docker compose up -d db` + `prisma db seed` (creates the demo user).
+ * Auth e2e. Requires `docker compose up -d db` + `prisma db seed` (creates the demo user).
  */
 describe('P1 auth', () => {
   let app: INestApplication;

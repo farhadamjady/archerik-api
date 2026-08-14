@@ -38,6 +38,21 @@ function loadKey(envVar: string): Buffer {
   return key;
 }
 
+/** The env vars that must hold a usable AES-256 key before the app is allowed to serve traffic. */
+export const REQUIRED_SECRET_KEY_VARS = ['SSO_ENCRYPTION_KEY', 'LLM_ENCRYPTION_KEY'] as const;
+
+/**
+ * Boot-time gate: every key named above must be present and the right length.
+ *
+ * `loadKey` alone only fails on first *use*, which would let the app start happily and then fail
+ * the first SSO login or provider-key save — hours later, in front of a user. Failing at startup
+ * keeps the "secrets fail closed" invariant an actual property of the process rather than a claim
+ * in the docs.
+ */
+export function assertSecretKeysConfigured(): void {
+  for (const envVar of REQUIRED_SECRET_KEY_VARS) loadKey(envVar);
+}
+
 /** Encrypts a secret for storage in a Bytes column, keyed by the named env var. */
 export function encryptSecret(plaintext: string, envVar: string): Buffer {
   const key = loadKey(envVar);

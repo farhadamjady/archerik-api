@@ -4,9 +4,10 @@ import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import { createTestApp } from './e2e-utils';
 import { MockIdp, seedSsoConnection, setupMockIdp } from './sso-fixtures';
+import { SSO_TOKEN_STORAGE_KEY } from '../src/auth/sso/sso-html';
 
 /**
- * SSO e2e (P1 §6, replaces the old ssoLogin() stub). Requires `docker compose up -d db` +
+ * SSO e2e. Requires `docker compose up -d db` +
  * `prisma db seed`, same as auth.e2e-spec.ts. No live IdP: `setupMockIdp` (test/sso-fixtures.ts)
  * intercepts the three URLs `openid-client` actually calls (discovery/jwks/token) by overriding
  * `globalThis.fetch`, so real signature/iss/aud/nonce validation runs against real crypto, just a
@@ -94,7 +95,7 @@ describe('SSO login', () => {
   }
 
   function tokenFrom(html: string): string {
-    const match = html.match(/cartograph\.token', "([^"]+)"\)/);
+    const match = html.match(new RegExp(`${SSO_TOKEN_STORAGE_KEY}', "([^"]+)"\\)`));
     if (!match) throw new Error(`No token found in HTML: ${html}`);
     return match[1];
   }
@@ -132,7 +133,7 @@ describe('SSO login', () => {
     // handle uniqueness is deduped app-wide (no per-test DB reset), not scoped to this test.
     const { code, text } = await completeCallback(email, { name: 'Round Trip User' });
     expect(code).toBe(200);
-    expect(text).toContain("sessionStorage.setItem('cartograph.token'");
+    expect(text).toContain("sessionStorage.setItem('archerik.token'");
 
     const token = tokenFrom(text);
     const me = await request(app.getHttpServer())
@@ -198,7 +199,7 @@ describe('SSO login', () => {
     const { code, text } = await completeCallback(email);
     // The callback always renders 200 (full-page navigation), but the error page — not a session.
     expect(code).toBe(200);
-    expect(text).not.toContain('cartograph.token');
+    expect(text).not.toContain('archerik.token');
     expect(text).toContain('sso_error=1');
 
     const users = await prisma.user.findMany({ where: { email } });
@@ -210,7 +211,7 @@ describe('SSO login', () => {
     const email = `unverified-${randomUUID()}@${domain}`;
     const { code, text } = await completeCallback(email, { email_verified: false });
     expect(code).toBe(200);
-    expect(text).not.toContain('cartograph.token');
+    expect(text).not.toContain('archerik.token');
     expect(text).toContain('sso_error=1');
     expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
   });
@@ -255,7 +256,7 @@ describe('SSO login', () => {
     const first = await request(app.getHttpServer())
       .get('/api/v1/auth/sso/callback')
       .query({ code: 'mock-code-1', state });
-    expect(first.text).toContain('cartograph.token');
+    expect(first.text).toContain('archerik.token');
 
     const second = await request(app.getHttpServer())
       .get('/api/v1/auth/sso/callback')

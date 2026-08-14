@@ -1,10 +1,10 @@
 // Renders the PR-comment markdown returned in IngestResponse.markdown. The CI posts this verbatim;
-// the server never touches GitHub. Format mirrors the reference fixture.
+// the server never touches GitHub.
 
 import { CategoryDiff, Endpoint, GraphDiff, KafkaEdge, OutboundDependency } from './model';
 
 const FOOTER =
-  '<sub>service-discovery · confidence: confirmed = found literally · likely = resolved through ' +
+  '<sub>archerik · confidence: confirmed = found literally · likely = resolved through ' +
   'config · uncertain = not statically resolvable (still real)</sub>';
 
 const MARK = { added: '➕', removed: '➖', changed: '🔄' } as const;

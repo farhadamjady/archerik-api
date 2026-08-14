@@ -3,8 +3,15 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ErrorBodyFilter } from './common/error-body.filter';
+import { assertSecretKeysConfigured } from './common/secret-box';
 
 async function bootstrap(): Promise<void> {
+  // Refuse to start without the encryption keys, rather than serving traffic that dies on the first
+  // SSO login or provider-key save. There is deliberately no default for either — see secret-box.ts.
+  // Reads process.env, which by this point includes any .env file: importing AppModule pulls in
+  // @prisma/client, and the Prisma client loads .env as it initialises.
+  assertSecretKeysConfigured();
+
   // rawBody: true captures req.rawBody so /v1/ingest can byte-compare against the stored baseline.
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
@@ -17,7 +24,7 @@ async function bootstrap(): Promise<void> {
     ],
   });
 
-  // Service graphs are large — the contract asks for a generous body cap (reference stub: 32 MB).
+  // Service graphs are large, so the body cap is deliberately generous. Align any proxy in front.
   app.useBodyParser('json', { limit: '32mb' });
 
   // Strict inbound validation: reject unknown query params, coerce types.
@@ -41,9 +48,7 @@ async function bootstrap(): Promise<void> {
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
   // eslint-disable-next-line no-console
-  console.log(
-    `Cartograph backend listening on http://localhost:${port} (UI: /api/v1, extractor: /v1)`,
-  );
+  console.log(`Archerik API listening on http://localhost:${port} (UI: /api/v1, extractor: /v1)`);
 }
 
 void bootstrap();
