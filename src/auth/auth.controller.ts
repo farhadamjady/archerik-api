@@ -48,7 +48,7 @@ export class AuthController {
   /**
    * Step 2 of SSO: the IdP redirects the browser back here with `code`/`state`. Full-page browser
    * navigation, not a fetch — on success, returns a tiny page that writes the token to
-   * sessionStorage['cartograph.token'] then redirects to APP_URL, so no UI changes are needed. Any
+   * sessionStorage under the key archerik-ui reads, then redirects to APP_URL. Any
    * failure (bad/expired state, IdP error=, claim validation) renders a generic error page instead
    * — never a silent logged-in-anyway result.
    */

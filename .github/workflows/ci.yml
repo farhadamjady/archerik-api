@@ -17,19 +17,19 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: cartograph
-          POSTGRES_PASSWORD: cartograph
-          POSTGRES_DB: cartograph
+          POSTGRES_USER: archerik
+          POSTGRES_PASSWORD: archerik
+          POSTGRES_DB: archerik
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U cartograph -d cartograph"
+          --health-cmd "pg_isready -U archerik -d archerik"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://cartograph:cartograph@localhost:5432/cartograph?schema=public
+      DATABASE_URL: postgresql://archerik:archerik@localhost:5432/archerik?schema=public
       # Test-only keys. Both are required at boot — the app fails closed without them.
       SSO_ENCRYPTION_KEY: dGVzdC1zc28ta2V5LTMyLWJ5dGVzLWxvbmctYWFhYWE=
       LLM_ENCRYPTION_KEY: dGVzdC1sbG0ta2V5LTMyLWJ5dGVzLWxvbmctYWFhYWE=

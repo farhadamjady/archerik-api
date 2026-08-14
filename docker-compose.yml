@@ -1,18 +1,18 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: cartograph-db
+    container_name: archerik-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: cartograph
-      POSTGRES_PASSWORD: cartograph
-      POSTGRES_DB: cartograph
+      POSTGRES_USER: archerik
+      POSTGRES_PASSWORD: archerik
+      POSTGRES_DB: archerik
     ports:
       - '5432:5432'
     volumes:
-      - cartograph-pgdata:/var/lib/postgresql/data
+      - archerik-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U cartograph -d cartograph']
+      test: ['CMD-SHELL', 'pg_isready -U archerik -d archerik']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,7 +20,7 @@ services:
   # Optional web UI for the DB at http://localhost:8080 (profile: tools)
   adminer:
     image: adminer:4
-    container_name: cartograph-adminer
+    container_name: archerik-adminer
     restart: unless-stopped
     profiles: ['tools']
     ports:
@@ -29,4 +29,4 @@ services:
       - db
 
 volumes:
-  cartograph-pgdata:
+  archerik-pgdata:

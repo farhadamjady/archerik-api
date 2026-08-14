@@ -36,7 +36,7 @@ export interface Schema {
 
 /**
  * Historical aliases — request/response/message schemas and their fields are one recursive `Schema`
- * now (§4a). Kept so call sites still read as "a field" vs. "a root type".
+ * now. Kept so call sites still read as "a field" vs. "a root type".
  */
 export type SchemaField = Schema;
 export type SchemaType = Schema;

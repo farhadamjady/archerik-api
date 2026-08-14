@@ -54,7 +54,7 @@ async function seedDemoUser(accountId: string): Promise<void> {
 // maxServices is the pricing-tier service cap; the demo uses the higher (75) tier so local scans of
 // a realistic fleet aren't blocked at the entry limit. An admin sets this per account in production.
 const DEMO_ACCOUNT = { name: 'Acme (demo)', plan: 'mvp', quotaRemaining: 1000000, maxServices: 75 };
-const DEMO_API_KEY = 'ekg_dev_local_demokey';
+const DEMO_API_KEY = 'ark_dev_local_demokey';
 
 async function seedExtractorAccount(): Promise<string> {
   const keyHash = createHash('sha256').update(DEMO_API_KEY).digest('hex');
@@ -160,7 +160,7 @@ const DEMO_FLEET: Array<{
               { name: 'currency', type: 'string(3)', required: 'required' },
             ],
           },
-          // Showcases the full §4a nested-entity contract: a nested object truncated at depth 2,
+          // Showcases the full nested-entity contract: a nested object truncated at depth 2,
           // an array-of-object (element fields hoisted), a map, an enum (declaration order), and
           // per-field constraints — all sorted by wire name, as the extractor emits them.
           response: {

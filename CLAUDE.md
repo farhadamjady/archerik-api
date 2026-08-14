@@ -15,10 +15,10 @@ comment can drift but the types cannot:
 
 ## 1. What Archerik is
 
-Archerik is a **service catalog** for fleets of Spring Boot microservices, built from static
+Archerik is a **service catalog** for fleets of microservices, built from static
 analysis rather than from a wiki nobody updates.
 
-A scanner walks a repository and reports what it found: the REST endpoints a service exposes, the
+An extractor walks a repository and reports what it found: the REST endpoints a service exposes, the
 services it calls, the Kafka topics it produces and consumes, and the field-level schemas of all of
 those. It POSTs that to this backend, one JSON document per service. The backend diffs each
 submission against that service's stored baseline, returns a PR-comment-ready summary of what
@@ -47,12 +47,12 @@ Three repositories, of which this is one:
 
 | Repo | Role |
 |---|---|
-| `service-discovery` | the scanner — a Go CLI that runs in CI and POSTs one document per service |
-| **`service-discovery-backend-chore`** | **this repo** — the control plane: ingest, diff, catalog, Ask |
-| `service-discovery-backend-ui` | the web UI that reads the catalog |
+| `archerik-extractor` | the extractor — a Go CLI that runs in CI and POSTs one document per service |
+| **`archerik-api`** | **this repo** — the control plane: ingest, diff, catalog, Ask |
+| `archerik-ui` | the web UI that reads the catalog |
 
 Only this backend needs to exist for the API to be useful; the ingest contract is plain HTTP + JSON,
-so any scanner that can produce the body typed in `src/ingest/model.ts` works.
+so any extractor that can produce the body typed in `src/ingest/model.ts` works.
 
 **Stack:** NestJS 10 (TypeScript) · PostgreSQL via Prisma · Docker Compose for local Postgres.
 
@@ -77,11 +77,15 @@ stored baseline (unchanged ⇒ early return) → `graphdiff.ts` computes the sem
 PR comment → and, **only on a default-branch scan**, the baseline is written and
 `account-projection.service.ts` rebuilds the read model.
 
-Two things here are load-bearing:
+Three things here are load-bearing:
 
 - **The submitted body is stored as raw bytes and never re-marshalled.** The "unchanged" fast path
   is a literal byte comparison, so re-serialising would reorder keys and break it.
 - **A PR scan diffs but never writes the baseline.** A pull request cannot move recorded truth.
+- **Commit metadata rides in headers, not the body**, so the body stays the pure graph.
+  `X-Archerik-{Sha,Branch,PR,Default-Branch}` are canonical; the older `X-EKG-*` spelling is still
+  accepted and must stay accepted, because the extractor ships on its own schedule and CI pipelines
+  in the field still send it.
 
 ### 3.2 Read side (`/api/v1`) — `src/graph/`, `src/contracts/`, `src/commits/`
 
@@ -94,7 +98,7 @@ The read model is materialised: one `Graph` row per `(account, branch)`, overwri
 every ingest that changes a baseline. Reads are a single row fetch plus filtering, not a join over
 baselines.
 
-`GET /commits` currently returns `[]` by design — the scanner doesn't send commit metadata yet, so
+`GET /commits` currently returns `[]` by design — the extractor doesn't send commit metadata yet, so
 no per-commit diffs are projected.
 
 ### 3.3 Ask (`POST /api/v1/ask`) — `src/ask/`, `src/llm/`
@@ -123,6 +127,11 @@ SSO is real multi-tenant OIDC: each account brings its own IdP, routed by email 
 Code + PKCE, with JIT provisioning. An email already belonging to a *different* account is always
 rejected, never silently reassigned.
 
+The callback hands the session to the browser by writing `sessionStorage[SSO_TOKEN_STORAGE_KEY]`
+(`src/auth/sso/sso-html.ts`) and redirecting to `APP_URL`. That key is a **contract with
+`archerik-ui`**, which reads the same one — change it on one side alone and SSO login breaks
+silently: the redirect succeeds and the UI still shows the sign-in screen.
+
 ## 4. Data model
 
 Prisma schema in `prisma/schema.prisma`. The shape follows one idea: **store the extractor's truth
@@ -130,12 +139,12 @@ verbatim, and materialise everything else.**
 
 | Table | Role |
 |---|---|
-| `service_baselines` | the source of truth — the scanner's byte-stable JSON per `(account, repository, service_id, default_branch)` |
+| `service_baselines` | the source of truth — the extractor's byte-stable JSON per `(account, repository, service_id, default_branch)` |
 | `graphs` | materialised read model, one row per `(account, branch)`, overwritten in place |
 | `contracts` | endpoints/topics belonging to a graph row |
-| `commits` | per-commit change records (unpopulated until the scanner sends commit metadata) |
+| `commits` | per-commit change records (unpopulated until the extractor sends commit metadata) |
 | `scans` | one row per ingest call — the account's audit/metering log, including rejections |
-| `accounts`, `api_keys` | tenants and their scanner credentials (keys stored hashed) |
+| `accounts`, `api_keys` | tenants and their extractor credentials (keys stored hashed) |
 | `users`, `sessions` | login and opaque session tokens (both hashed) |
 | `sso_connections`, `sso_domains`, `sso_auth_requests` | per-tenant OIDC config and in-flight logins |
 | `llm_provider_keys` | per-account provider keys, encrypted at rest, with `last4` denormalised |
